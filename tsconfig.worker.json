@@ -1,0 +1,5 @@
+{
+  "extends": "./tsconfig.test.json",
+  "compilerOptions": { "outDir": ".worker-build" },
+  "include": ["app/lib/server/sync-worker.ts"]
+}

@@ -1,0 +1,194 @@
+import { randomUUID } from "node:crypto";
+import { db, readSetting } from "./database";
+import { HttpError } from "./http";
+import type { Agent } from "../portal";
+import {
+  irreversibleTask,
+  type Task,
+  type Batch,
+  type Discovery,
+  type TaskSnapshot,
+} from "../tasks";
+export function taskDb() {
+  const d = db();
+  d.exec(`CREATE TABLE IF NOT EXISTS task_batches(id TEXT PRIMARY KEY, body TEXT NOT NULL);
+    CREATE TABLE IF NOT EXISTS execution_tasks(id TEXT PRIMARY KEY, body TEXT NOT NULL);
+    CREATE TABLE IF NOT EXISTS discoveries(batch_id TEXT NOT NULL, kind TEXT NOT NULL, entity_id TEXT NOT NULL, actor TEXT NOT NULL, body TEXT NOT NULL, PRIMARY KEY(batch_id,kind,entity_id,actor));
+    CREATE TABLE IF NOT EXISTS task_requests(id TEXT PRIMARY KEY, body TEXT NOT NULL);
+    CREATE TABLE IF NOT EXISTS browser_claims(resource TEXT PRIMARY KEY, task_id TEXT NOT NULL, lease_until TEXT NOT NULL);`);
+  return d;
+}
+export function allTasks(): Task[] {
+  return taskDb()
+    .prepare(
+      "SELECT body FROM execution_tasks ORDER BY json_extract(body,'$.createdAt') DESC",
+    )
+    .all()
+    .map((r) => JSON.parse(String(r.body)));
+}
+export function allBatches(): Batch[] {
+  return taskDb()
+    .prepare(
+      "SELECT body FROM task_batches ORDER BY json_extract(body,'$.createdAt') DESC",
+    )
+    .all()
+    .map((r) => JSON.parse(String(r.body)));
+}
+export function allDiscoveries(): Discovery[] {
+  return taskDb()
+    .prepare("SELECT body FROM discoveries")
+    .all()
+    .map((r) => JSON.parse(String(r.body)));
+}
+export function saveTask(t: Task) {
+  taskDb()
+    .prepare(
+      "INSERT INTO execution_tasks VALUES (?,?) ON CONFLICT(id) DO UPDATE SET body=excluded.body",
+    )
+    .run(t.id, JSON.stringify(t));
+}
+export function saveBatch(b: Batch) {
+  taskDb()
+    .prepare(
+      "INSERT INTO task_batches VALUES (?,?) ON CONFLICT(id) DO UPDATE SET body=excluded.body",
+    )
+    .run(b.id, JSON.stringify(b));
+}
+export function newTask(
+  kind: Task["kind"],
+  owner: Agent,
+  title: string,
+  input: Task["input"],
+  extra: Partial<Task> = {},
+): Task {
+  const now = new Date().toISOString();
+  return {
+    id: randomUUID(),
+    kind,
+    owner,
+    title,
+    input,
+    status: "queued",
+    version: 1,
+    createdAt: now,
+    updatedAt: now,
+    ...extra,
+  };
+}
+export function taskTransaction<T>(fn: () => T): T {
+  const d = taskDb();
+  d.exec("BEGIN IMMEDIATE");
+  try {
+    const r = fn();
+    d.exec("COMMIT");
+    return r;
+  } catch (e) {
+    d.exec("ROLLBACK");
+    throw e;
+  }
+}
+export function requireClaim(
+  actor: Agent,
+  taskId: unknown,
+  token: unknown,
+  kind?: Task["kind"],
+): Task {
+  const t = allTasks().find((x) => x.id === taskId);
+  if (
+    !t ||
+    t.owner !== actor ||
+    t.status !== "claimed" ||
+    !token ||
+    t.claimToken !== token ||
+    !t.leaseUntil ||
+    Date.parse(t.leaseUntil) <= Date.now() ||
+    (kind && t.kind !== kind)
+  )
+    throw new HttpError(
+      409,
+      "A live claim owned by this agent is required. Refresh tasks before proceeding.",
+    );
+  return t;
+}
+export function checkDiscoveryClaim(
+  actor: Agent,
+  input: Record<string, unknown>,
+) {
+  if (!input.batchId) return;
+  const b = allBatches().find((x) => x.id === input.batchId);
+  const t = requireClaim(actor, input.taskId, input.claimToken, "discover");
+  if (!b || b.status !== "discovering" || t.batchId !== b.id)
+    throw new HttpError(409, "Discovery batch is not accepting results.");
+}
+export function recordDiscovery(
+  actor: Agent,
+  batchId: unknown,
+  kind: Discovery["kind"],
+  entityId: string,
+  evidence: string,
+) {
+  if (typeof batchId !== "string") return;
+  const entry: Discovery = {
+    batchId,
+    kind,
+    entityId,
+    actor,
+    evidence,
+    at: new Date().toISOString(),
+  };
+  taskDb()
+    .prepare(
+      "INSERT INTO discoveries VALUES (?,?,?,?,?) ON CONFLICT(batch_id,kind,entity_id,actor) DO UPDATE SET body=excluded.body",
+    )
+    .run(batchId, kind, entityId, actor, JSON.stringify(entry));
+}
+export function expireClaims() {
+  // Unknown external effects are never automatically reassigned.
+  for (const t of allTasks())
+    if (
+      t.status === "claimed" &&
+      Date.parse(t.leaseUntil || "") <= Date.now()
+    ) {
+      t.status = irreversibleTask(t) ? "uncertain" : "blocked";
+      t.version++;
+      t.updatedAt = new Date().toISOString();
+      t.result = {
+        summary:
+          "Claim expired. Check the external page before retrying; no automatic retry.",
+      };
+      saveTask(t);
+    }
+}
+export function publicTask(t: Task): Task {
+  const clean = { ...t };
+  delete clean.claimToken;
+  return clean;
+}
+export function taskSnapshot(actor?: Agent): TaskSnapshot {
+  return taskTransaction(() => {
+    expireClaims();
+    return {
+      batches: allBatches(),
+      tasks: allTasks()
+        .filter((t) => !actor || t.owner === actor)
+        .map(publicTask),
+      discoveries: allDiscoveries(),
+      workers: (["dot", "muse"] as const).map((a) => ({
+        actor: a,
+        lastPoll: readSetting<string>(`worker_poll:${a}`),
+        ...readSetting<{ schedule: string; registeredAt: string }>(
+          `worker_schedule:${a}`,
+        ),
+      })),
+    };
+  });
+}
+export function frozenDraftOwner(contactId: string): Agent | null {
+  const tasks = allTasks().filter(
+    (t) =>
+      t.kind === "draft" &&
+      t.entityId === contactId &&
+      t.status !== "cancelled",
+  );
+  return tasks[tasks.length - 1]?.owner || null;
+}

@@ -8,3 +8,9 @@ coverage/
 .vercel/
 .DS_Store
 *.log
+
+.test-build/
+*.tsbuildinfo
+.data/
+
+.worker-build/

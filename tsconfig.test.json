@@ -1,0 +1,22 @@
+{
+  "compilerOptions": {
+    "target": "ES2020",
+    "module": "CommonJS",
+    "moduleResolution": "Node",
+    "strict": true,
+    "skipLibCheck": true,
+    "outDir": ".test-build",
+    "rootDir": "app/lib"
+  },
+  "include": [
+    "app/lib/model.ts",
+    "app/lib/eligibility.ts",
+    "app/lib/demo.ts",
+    "app/lib/logic.ts",
+    "app/lib/migration.ts",
+    "app/lib/empty.ts",
+    "app/lib/mail.ts",
+    "app/lib/sync-pages.ts",
+    "app/lib/server/*.ts"
+  ]
+}
