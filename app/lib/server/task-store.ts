@@ -94,20 +94,18 @@ export function requireClaim(
   kind?: Task["kind"],
 ): Task {
   const t = allTasks().find((x) => x.id === taskId);
-  if (
-    !t ||
-    t.owner !== actor ||
-    t.status !== "claimed" ||
-    !token ||
-    t.claimToken !== token ||
-    !t.leaseUntil ||
-    Date.parse(t.leaseUntil) <= Date.now() ||
-    (kind && t.kind !== kind)
-  )
-    throw new HttpError(
-      409,
-      "A live claim owned by this agent is required. Refresh tasks before proceeding.",
-    );
+  const reject = (reason: string): never => {
+    throw new HttpError(409, `A live claim is required. ${reason} Refresh tasks before proceeding.`);
+  };
+  if (typeof taskId !== "string" || !taskId.trim()) return reject("CLAIM_TASK_ID_MISSING: Supply taskId from the current claim; this request did not identify a task.");
+  if (!t) return reject("CLAIM_TASK_NOT_FOUND: No task matches this taskId.");
+  if (t.owner !== actor) return reject("CLAIM_WRONG_ACTOR: The authenticated agent does not own this task.");
+  if (t.status !== "claimed") return reject(`CLAIM_NOT_ACTIVE: Task status is ${t.status}, not claimed.`);
+  if (!t.leaseUntil || !Number.isFinite(Date.parse(t.leaseUntil)) || Date.parse(t.leaseUntil) <= Date.now())
+    return reject("CLAIM_EXPIRED: The server-side lease has expired. Request requeue; heartbeat cannot revive it.");
+  if (typeof token !== "string" || !token) return reject("CLAIM_TOKEN_MISSING: Supply the private claimToken returned by the latest successful claim.");
+  if (t.claimToken !== token) return reject("CLAIM_TOKEN_MISMATCH: This token does not match the current claim. Use the exact token from the latest successful claim; do not reuse an earlier one.");
+  if (kind && t.kind !== kind) return reject("CLAIM_WRONG_KIND: This task does not permit the requested operation.");
   return t;
 }
 export function checkDiscoveryClaim(

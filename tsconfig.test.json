@@ -17,6 +17,7 @@
     "app/lib/empty.ts",
     "app/lib/mail.ts",
     "app/lib/sync-pages.ts",
-    "app/lib/server/*.ts"
+    "app/lib/server/*.ts",
+    "app/lib/workbench.ts"
   ]
 }

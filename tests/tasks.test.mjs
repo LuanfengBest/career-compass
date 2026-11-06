@@ -417,6 +417,30 @@ test("explicit drafting tasks preserve edited drafts and cannot complete using a
     false,
   );
 });
+test("claim errors distinguish token mismatch from expiry and stopped discovery can be requeued without losing results", () => {
+  const b = create();
+  const original = s.allTasks().find(t => t.batchId === b.batchId && t.owner === 'muse');
+  const t = claim(original);
+  s.taskDb().prepare('INSERT INTO browser_claims VALUES (?,?,?)').run('fixture-requeue',t.id,t.leaseUntil);
+  const saved = contact(t, 'requeue-contact');
+  assert.throws(() => s.requireClaim('muse', t.id, 'old-token'), /CLAIM_TOKEN_MISMATCH/);
+  assert.throws(() => s.requireClaim('muse', t.id, undefined), /CLAIM_TOKEN_MISSING/);
+  assert.throws(() => s.requireClaim('dot', t.id, t.claimToken), /CLAIM_WRONG_ACTOR/);
+  assert.doesNotThrow(() => s.requireClaim('muse', t.id, t.claimToken));
+  assert.throws(() => a.userTaskAction({action:'requeue_discovery',taskId:t.id,version:t.version}), /stopped discovery/);
+  a.userTaskAction({action:'requeue_discovery',taskId:t.id,version:t.version,stopped:true});
+  assert.equal(s.allTasks().find(x => x.id === t.id).status, 'queued');
+  assert.equal(s.taskDb().prepare('SELECT * FROM browser_claims WHERE task_id=?').get(t.id), undefined);
+  assert.ok(db.readWorkspace().workspace.contacts.some(x => x.id === saved.contactId));
+  assert.ok(s.allDiscoveries().some(x => x.entityId === saved.contactId));
+  const next = claim(s.allTasks().find(x => x.id === t.id));
+  assert.notEqual(next.claimToken, t.claimToken);
+  assert.throws(() => s.requireClaim('muse', next.id, t.claimToken), /CLAIM_TOKEN_MISMATCH/);
+  next.leaseUntil = new Date(Date.now()-1).toISOString(); s.saveTask(next);
+  assert.throws(() => s.requireClaim('muse', next.id, next.claimToken), /CLAIM_EXPIRED/);
+  const send = s.newTask('linkedin_send','muse','Fixture only',{});send.status='blocked';s.saveTask(send);
+  assert.throws(() => a.userTaskAction({action:'requeue_discovery',taskId:send.id,version:send.version,stopped:true}), /stopped discovery/);
+});
 test.after(() => {
   db.db().close();
   rmSync(dir, { recursive: true, force: true });

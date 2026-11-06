@@ -9,6 +9,8 @@ export async function GET(req: Request) {
     const actor = agentAuth(req);
     setSetting(`worker_poll:${actor}`, new Date().toISOString());
     return json({
+      actor,
+      checkedAt: new Date().toISOString(),
       ...taskSnapshot(actor),
       profile: readWorkspace().workspace.profile,
       instructions:

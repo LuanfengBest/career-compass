@@ -459,6 +459,17 @@ export function userTaskAction(v: Record<string, unknown>) {
       return { ok: true, taskId: t.id };
     }
     const t = checkedTask(v);
+    if (v.action === "requeue_discovery") {
+      if (t.kind !== "discover" || !["claimed", "blocked"].includes(t.status) || v.stopped !== true)
+        throw new HttpError(409, "Only a stopped discovery task can be requeued by its owner. Sending and submission tasks are excluded.");
+      if (allBatches().find(b => b.id === t.batchId)?.status !== "discovering")
+        throw new HttpError(409, "The batch is no longer accepting discoveries.");
+      t.status = "queued";
+      delete t.result;
+      finish(t);
+      log("user", "discovery_requeued", `${t.title}: stopped discovery requeued; previous claim invalidated, saved records preserved.`);
+      return {ok: true};
+    }
     if (v.action === "reconcile") {
       if (
         t.status !== "uncertain" ||
@@ -608,6 +619,8 @@ export function userTaskAction(v: Record<string, unknown>) {
 }
 
 export function agentTaskAction(actor: Agent, v: Record<string, unknown>) {
+  if (!["daily_tick", "begin_discovery_round", "register_worker", "claim", "heartbeat", "report"].includes(String(v.action)))
+    throw new HttpError(400, 'Unknown agent task action. Completion requires action:"report", status:"completed", eventId, taskId, claimToken, summary and coverage. The browser workbench supplies claim fields.');
   return taskTransaction(() => {
     expireClaims();
     if (v.action === "daily_tick")
