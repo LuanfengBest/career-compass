@@ -30,6 +30,8 @@ export type PortalSnapshot = {
   drafts: PortalDraft[];
   events: PortalEvent[];
   agents: { actor: Agent; configured: boolean; lastSeen: string | null; localCredential?: boolean; cloudCredential?: boolean; cloudCheck?: string | null }[];
+  oauthConnections?: {id: string; actor: "dot"; createdAt: string; expiresAt: string}[];
+  dotMcpCheck?: string | null;
   sendEnabled: boolean;
   syncAt: string | null;
 };

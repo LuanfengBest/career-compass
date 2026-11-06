@@ -1,4 +1,5 @@
 import {sendApprovedDrafts} from "../../lib/server/bulk-outreach";
+import {oauthConnections,revokeDotOAuth} from "../../lib/server/mcp-oauth";
 import { provisionLocalCredential, localCredentialConfigured, revokeBrowserSessions, browserConnectionConfigured, issueCloudCredential } from "../../lib/server/agent-connection";
 import { body, failure, guard, HttpError, json } from "../../lib/server/http";
 import {
@@ -20,9 +21,11 @@ export async function GET(req: Request) {
       events: events(),
       sendEnabled: gmailCanSend(),
       syncAt: readSetting("portal_sync_at"),
+      oauthConnections: oauthConnections(),
+      dotMcpCheck: readSetting("agent_mcp_check:dot"),
       agents: (["dot", "muse"] as const).map((actor) => ({
         actor,
-        configured: !!readSetting(`agent_token:${actor}`) || !!readSetting(`agent_cloud_token:${actor}`) || browserConnectionConfigured(actor),
+        configured: !!readSetting(`agent_token:${actor}`) || !!readSetting(`agent_cloud_token:${actor}`) || browserConnectionConfigured(actor) || (actor === "dot" && oauthConnections().length > 0),
         cloudCredential: !!readSetting(`agent_cloud_token:${actor}`),
         cloudCheck: readSetting<string>(`agent_cloud_check:${actor}`),
         localCredential: localCredentialConfigured(actor),
@@ -39,6 +42,7 @@ export async function POST(req: Request) {
     const v = (await body(req)) as Record<string, unknown>;
     if (!v || typeof v !== "object" || Array.isArray(v))
       throw new HttpError(400, "Expected a JSON object.");
+    if(v.action === "oauth-disconnect") {revokeDotOAuth();return json({ok:true});}
     if (["connect", "disconnect", "local-connect", "cloud-connect", "cloud-disconnect"].includes(String(v.action))) {
       if (v.actor !== "dot" && v.actor !== "muse")
         throw new HttpError(400, "Invalid agent.");
@@ -50,6 +54,7 @@ export async function POST(req: Request) {
         return json({ok:true});
       }
       if (v.action === "disconnect") {
+        if(v.actor === "dot")revokeDotOAuth();
         removeSetting(`agent_token:${v.actor}`);
         removeSetting(`agent_cloud_token:${v.actor}`);
         removeSetting(`agent_cloud_check:${v.actor}`);

@@ -71,7 +71,7 @@ export function AgentConnections() {
                 A check-in is not proof of an active background session.
               </p>
               <div className="button-row">
-                {cloud?<a href="#background-api" className="button primary">Configure background API</a>:<button
+                {cloud?<a href={actor === "dot" ? "#dot-oauth" : "#background-api"} className="button primary">Configure background API</a>:<button
                   className="button primary"
                   disabled={busy}
                   onClick={() => connect(actor)}
@@ -96,6 +96,15 @@ export function AgentConnections() {
           );
         })}
       </div>
+      <section className="panel" id="dot-oauth">
+        <h2>ChatGPT Dot OAuth</h2>
+        <p>Connect a custom remote MCP server in ChatGPT. Select OAuth, use the server URL below, and approve Dot access after signing in to this workspace. Client registration is automatic; no API key or client secret needs to be copied.</p>
+        <label>Server URL<input readOnly value={`${origin}/mcp`} /></label>
+        <p>{cloud ? "This connection uses cloud HTTPS and does not require your Mac." : "Deploy the HTTPS workspace before connecting."} Authorization lasts up to 90 days and supports token refresh. Employer forms and LinkedIn still require the agent’s own browser and account access.</p>
+        <p>Active authorizations: {data.oauthConnections?.length || 0} · Last authenticated MCP check: {data.dotMcpCheck ? new Date(data.dotMcpCheck).toLocaleString() : "Not verified"}.</p>
+        <p>After connecting, ask Dot to call career_connection, career_guide and career_tasks. Then verify one independent scheduled run. An authorization or a check-in alone does not prove unattended execution.</p>
+        {!!data.oauthConnections?.length && <button className="button secondary" disabled={busy} onClick={()=>void portalAction({action:"oauth-disconnect"}).then(()=>setNotice("Dot OAuth access revoked. Reconnect in ChatGPT when needed.")).catch(e=>setNotice(e.message))}>Revoke Dot OAuth access</button>}
+      </section>
       <section className="panel" id="background-api">
         <h2>Background HTTPS API access</h2>
         <p>Read the queue and upload findings through authenticated HTTP, without controlling your Mac. This requires a deployed HTTPS portal and an agent-supported secure credential connection usable by its scheduled runs. A saved token alone does not prove that capability. The credential grants this agent access to shared profile, jobs, contacts, drafts, imported email evidence and its assigned tasks; it does not grant owner administration or direct Gmail sending.</p>

@@ -45,3 +45,7 @@ Cloud hosting keeps the website and Gmail worker available when your Mac is off.
 - Expired/blocked tasks still need owner review. Application preparation, final submission and LinkedIn sending cannot use this recovery operation: external state must be checked before retrying. Token invalidation fences website writes, not a browser click already happening on another website.
 - Background portal access is separate from job-site/LinkedIn automation. HTTPS plus a secure connector removes the Mac dependency for queue reads and uploads. It does not supply an authenticated cloud browser for employer forms or LinkedIn. Test those capabilities independently. Do not silently fall back to the owner's foreground Chrome.
 - Acceptance before changing daily routines: authenticated diagnostic + queue read, one real record upload + read-back, the same checks from a real scheduled execution, then application preparation and draft review. Saved credentials, schedules and successful health checks are not end-to-end proof.
+
+## ChatGPT Dot OAuth connector
+
+Dot can use remote MCP with OAuth at `/mcp`; see [MCP_OAUTH.md](MCP_OAUTH.md) for setup, permissions, token lifetime, revocation and acceptance tests. Muse keeps its separately configured HTTPS credential connector. Do not use the workspace password as an API key. No additional Google OAuth client is involved.
