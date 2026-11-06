@@ -261,6 +261,8 @@ export function userTaskAction(v: Record<string, unknown>) {
       if (mode === "discover") {
         if (v.channel !== "email" && v.channel !== "linkedin")
           throw new HttpError(400, "Choose a draft channel.");
+        if (v.autoRelease !== undefined && typeof v.autoRelease !== "boolean")
+          throw new HttpError(400, "autoRelease must be a boolean.");
         const b: Batch = {
           id: randomUUID(),
           title,
@@ -270,6 +272,7 @@ export function userTaskAction(v: Record<string, unknown>) {
           status: "discovering",
           channel: v.channel,
           prepareApplications: v.prepareApplications === true,
+          autoRelease: v.autoRelease !== false,
         };
         saveBatch(b);
         for (const actor of ["dot", "muse"] as const)

@@ -105,7 +105,7 @@ export function AgentConnections() {
           handles Muse-only discoveries. No company-type split.
         </p>
         <p>
-          Both discovery reports must finish. Daily batches automatically assign preparation; one-off batches await your release in Tasks. Claims prevent concurrent execution. Application answers
+          Both discovery reports must finish. New daily and one-off batches automatically assign preparation; older manual batches still need release in Tasks. Claims prevent concurrent execution. Application answers
           require your review before a submission task is created.
         </p>
         <p>

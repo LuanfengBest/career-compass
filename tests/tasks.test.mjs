@@ -84,6 +84,7 @@ test("one user request is idempotent and creates two full-scope discovery tasks"
   const v = {
     action: "create",
     requestId: "idempotent",
+    autoRelease: false,
     title: "Test",
     brief: "Full scope",
     mode: "discover",
@@ -307,7 +308,7 @@ test("ambiguous identities remain blocked on retry; no guessed-email merge", () 
     target = r.contactId;
     report(cl);
   }
-  a.userTaskAction({ action: "release", batchId: b.batchId });
+  assert.equal(s.allBatches().find(x => x.id === b.batchId).status, "released");
   const blocked = s.allTasks().find((t) => t.entityId === target);
   assert.equal(blocked.status, "blocked");
   assert.throws(
@@ -440,6 +441,31 @@ test("claim errors distinguish token mismatch from expiry and stopped discovery 
   assert.throws(() => s.requireClaim('muse', next.id, next.claimToken), /CLAIM_EXPIRED/);
   const send = s.newTask('linkedin_send','muse','Fixture only',{});send.status='blocked';s.saveTask(send);
   assert.throws(() => a.userTaskAction({action:'requeue_discovery',taskId:send.id,version:send.version,stopped:true}), /stopped discovery/);
+});
+test("new user rounds auto-assign preparation only after both reports, without duplicate tasks or sends", () => {
+  const b = create();
+  assert.equal(s.allBatches().find(x => x.id === b.batchId).autoRelease, true);
+  const d = claim(s.allTasks().find(x => x.batchId === b.batchId && x.owner === 'dot'));
+  const m = claim(s.allTasks().find(x => x.batchId === b.batchId && x.owner === 'muse'));
+  const sharedId = contact(d, 'automatic-shared').contactId;
+  assert.equal(contact(m, 'automatic-shared').contactId, sharedId);
+  const museId = contact(m, 'automatic-muse-only').contactId;
+  const j = p.submitAgent('muse', {type:'opportunity',eventId:eid(),batchId:b.batchId,taskId:m.id,claimToken:m.claimToken,job:{company:'Automatic fixture',role:'Product Analyst New Grad',family:'DA',region:'United States',location:'NY',jdUrl:'https://example.com/jobs/auto',fit:'Fixture',summary:'2027 full time'}});
+  report(d);
+  assert.equal(s.allBatches().find(x => x.id === b.batchId).status, 'discovering');
+  assert.equal(s.allTasks().filter(x => x.batchId === b.batchId && x.kind !== 'discover').length, 0);
+  const completion = {action:'report',taskId:m.id,claimToken:m.claimToken,eventId:eid(),status:'completed',summary:'Fixture complete',coverage:'Fixture only'};
+  a.agentTaskAction('muse', completion);
+  a.agentTaskAction('muse', completion);
+  assert.equal(s.allBatches().find(x => x.id === b.batchId).status, 'released');
+  const prep = s.allTasks().filter(x => x.batchId === b.batchId && x.kind !== 'discover');
+  assert.equal(prep.length, 3);
+  assert.equal(prep.find(x => x.entityId === sharedId).owner, 'dot');
+  assert.equal(prep.find(x => x.entityId === museId).owner, 'muse');
+  assert.equal(prep.find(x => x.entityId === j.jobId).kind, 'application_prepare');
+  assert.ok(prep.every(x => ['draft','application_prepare'].includes(x.kind) && x.status === 'queued'));
+  assert.equal(db.readWorkspace().workspace.applications.some(x => x.jobId === j.jobId), false);
+  assert.equal(p.events().some(x => [sharedId,museId].includes(x.contactId) && /sent/.test(x.kind)), false);
 });
 test.after(() => {
   db.db().close();

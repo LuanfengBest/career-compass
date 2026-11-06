@@ -132,7 +132,7 @@ export function TaskCenter() {
         </p>
         <ol>
           <li>
-            <strong>Find jobs & people:</strong> both agents search. For a request created here, review the combined discoveries before assigning preparation. Agent-initiated rounds coordinate their existing routine and assign preparation after both report completion.
+            <strong>Find jobs & people:</strong> both agents search. New rounds automatically assign application preparation and drafts after both report completion. You review the finished answers and messages before final submission or sending. Older manual rounds still need the release button.
           </li>
           <li>
             <strong>Draft for a contact:</strong> choose someone already in
