@@ -39,7 +39,7 @@ test('token-free UI records and heartbeat pass real server claim checks; duplica
   const b=a.userTaskAction({action:'create',requestId:'workbench',title:'Fixture batch',brief:'Fixture scope',mode:'discover',channel:'email',prepareApplications:false});
   const queued=s.allTasks().find(t=>t.batchId===b.batchId&&t.owner==='muse');
   const claimed=a.agentTaskAction('muse',{action:'claim',taskId:queued.id,usesLocalBrowser:false}).task;
-  const held=w.readWorkbenchClaim(claimed);
+  let held=w.readWorkbenchClaim(claimed);
   assert.throws(()=>a.agentTaskAction('muse',{action:'complete',eventId:'bad-completion'}),/Unknown agent task action/);
   assert.throws(()=>a.agentTaskAction('muse',{action:'report',eventId:'missing-task',status:'completed'}),/CLAIM_TASK_ID_MISSING/);
   const heartbeat=w.prepareWorkbenchRequest('/api/agents/tasks',{action:'heartbeat',eventId:'hb1'},held,'muse');
@@ -49,6 +49,11 @@ test('token-free UI records and heartbeat pass real server claim checks; duplica
   const jobReceipt=p.submitAgent('muse',jobBody);
   assert.equal(jobReceipt.ok,true);assert.equal(p.submitAgent('muse',jobBody).jobId,jobReceipt.jobId);
   assert.equal(db.readWorkspace().workspace.jobs.length,1);
+  const recovered=a.agentTaskAction('muse',{action:'recover_claim',taskId:claimed.id,version:claimed.version,stopPreviousContext:true});
+  held=w.readWorkbenchClaim(recovered.task);
+  const replay=p.submitAgent('muse',w.prepareWorkbenchRequest('/api/agents',jobInput,held,'muse'));
+  assert.equal(replay.jobId,jobReceipt.jobId);assert.equal(db.readWorkspace().workspace.jobs.length,1);
+
   const input={eventId:'contact-one',type:'contact',contact:{externalId:'fixture',name:'Fixture Person',company:'Example',title:'Analyst',relationship:'Fixture',evidence:'Fixture only',source:'https://example.com',linkedin:'https://www.linkedin.com/in/workbench-fixture',email:'fixture@example.com'}};
   const body=w.prepareWorkbenchRequest('/api/agents',input,held,'muse');
   const first=p.submitAgent('muse',body),again=p.submitAgent('muse',body);

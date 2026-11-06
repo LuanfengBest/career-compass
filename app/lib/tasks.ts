@@ -82,3 +82,8 @@ export const taskLabels: Record<TaskKind, string> = {
 };
 export const irreversibleTask = (t: Task) =>
   t.kind === "application_submit" || t.kind === "linkedin_send";
+
+// These tasks only read data or save drafts. Form preparation can already have
+// changed an external form, so it deliberately requires owner reconciliation.
+export const recoverableClaimKind = (kind: string) =>
+  ["discover", "draft", "mail_review", "linkedin_sync"].includes(kind);

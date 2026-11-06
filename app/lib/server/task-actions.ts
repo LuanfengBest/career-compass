@@ -4,7 +4,7 @@ import { readWorkspace, writeWorkspace, setSetting } from "./database";
 import { HttpError } from "./http";
 import { addEvent, drafts, events, saveDraft, textField } from "./portal";
 import { normalizeLinkedIn, draftOwner, type Agent } from "../portal";
-import { irreversibleTask, type Task, type Batch } from "../tasks";
+import { irreversibleTask, recoverableClaimKind, type Task, type Batch } from "../tasks";
 import {
   allTasks,
   allBatches,
@@ -622,7 +622,7 @@ export function userTaskAction(v: Record<string, unknown>) {
 }
 
 export function agentTaskAction(actor: Agent, v: Record<string, unknown>) {
-  if (!["daily_tick", "begin_discovery_round", "register_worker", "claim", "heartbeat", "report"].includes(String(v.action)))
+  if (!["daily_tick", "begin_discovery_round", "register_worker", "claim", "recover_claim", "heartbeat", "report"].includes(String(v.action)))
     throw new HttpError(400, 'Unknown agent task action. Completion requires action:"report", status:"completed", eventId, taskId, claimToken, summary and coverage. The browser workbench supplies claim fields.');
   return taskTransaction(() => {
     expireClaims();
@@ -652,6 +652,29 @@ export function agentTaskAction(actor: Agent, v: Record<string, unknown>) {
       return {ok: true, created: true, batch: b};
     }
     setSetting(`worker_poll:${actor}`, new Date().toISOString());
+    if (v.action === "recover_claim") {
+      const t = allTasks().find(x => x.id === v.taskId);
+      if (!t || t.owner !== actor)
+        throw new HttpError(409, "CLAIM_RECOVERY_OWNER: Refresh your own queue before recovery.");
+      if (!recoverableClaimKind(t.kind))
+        throw new HttpError(409, "CLAIM_RECOVERY_EXTERNAL_WORK: Form preparation, sending and submission require owner reconciliation, not tab recovery.");
+      if (t.status !== "claimed" || !t.leaseUntil || Date.parse(t.leaseUntil) <= Date.now())
+        throw new HttpError(409, "CLAIM_RECOVERY_INACTIVE: Only a live claim can move here. Expired or blocked tasks need owner review.");
+      if (v.version !== t.version || v.stopPreviousContext !== true)
+        throw new HttpError(409, "CLAIM_RECOVERY_CHANGED: Refresh the queue and confirm you will stop using the old execution context.");
+      if (t.batchId && allBatches().find(b => b.id === t.batchId)?.status === "cancelled")
+        throw new HttpError(409, "Batch cancelled.");
+      // Atomic token rotation fences every old tab/client. No new task, no
+      // replayed results, no lease revival, and no change to browser ownership.
+      t.claimToken = randomUUID();
+      t.leaseUntil = new Date(Date.now() + 10 * 60000).toISOString();
+      t.updatedAt = new Date().toISOString();
+      t.version++;
+      saveTask(t);
+      taskDb().prepare("UPDATE browser_claims SET lease_until=? WHERE task_id=?").run(t.leaseUntil, t.id);
+      log(actor, "claim_recovered", `${t.title}: active read/draft claim moved to a new context; old credentials invalidated.`);
+      return {ok: true, task: t};
+    }
     if (v.action === "register_worker") {
       setSetting(`worker_schedule:${actor}`, {
         schedule: textField(v.schedule, "schedule", 1000),

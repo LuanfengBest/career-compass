@@ -1,4 +1,4 @@
-import { browserSessionActor } from "./agent-connection";
+import { browserSessionActor, cloudCredentialActor } from "./agent-connection";
 import {
   createHash,
   randomBytes,
@@ -80,6 +80,8 @@ export function issueToken(actor: Agent) {
 }
 export function agentAuth(req: Request): Agent {
   guard(req);
+  const cloudActor = cloudCredentialActor(req);
+  if (cloudActor) return cloudActor;
   if (!req.headers.has("authorization")) {
     const browserActor=browserSessionActor(req);
     if(browserActor)return browserActor;
@@ -93,7 +95,7 @@ export function agentAuth(req: Request): Agent {
   }
   throw new HttpError(
     401,
-    "Agent token missing or revoked. Use the local agent-client helper or pair a browser at /agent-workbench.",
+    "Agent token missing or revoked. Use your own configured HTTPS API credential, local helper, or paired browser session.",
   );
 }
 export function textField(

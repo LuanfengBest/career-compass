@@ -29,7 +29,7 @@ export type PortalEvent = {
 export type PortalSnapshot = {
   drafts: PortalDraft[];
   events: PortalEvent[];
-  agents: { actor: Agent; configured: boolean; lastSeen: string | null; localCredential?: boolean }[];
+  agents: { actor: Agent; configured: boolean; lastSeen: string | null; localCredential?: boolean; cloudCredential?: boolean; cloudCheck?: string | null }[];
   sendEnabled: boolean;
   syncAt: string | null;
 };

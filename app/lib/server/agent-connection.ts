@@ -4,8 +4,26 @@ import {randomUUID,createHash,randomBytes,timingSafeEqual} from 'node:crypto';
 import {db,readSetting,setSetting,removeSetting} from './database';
 import {seal,unseal} from './crypto';
 import {appOrigin,HttpError} from './http';
+import {cloudMode} from './owner-auth';
 import type {Agent} from '../portal';
 const hash=(value:string)=>createHash('sha256').update(value).digest('hex');
+export function issueCloudCredential(actor:Agent) {
+ if(!cloudMode() || !appOrigin().startsWith('https:'))throw new HttpError(409,'Deploy the private HTTPS portal before creating a cloud API credential.');
+ const token=randomBytes(32).toString('hex');
+ setSetting(`agent_cloud_token:${actor}`,hash(token));
+ removeSetting(`agent_cloud_check:${actor}`);
+ return {actor,token,origin:appOrigin()};
+}
+export function cloudCredentialActor(req:Request):Agent|null {
+ if(!cloudMode())return null;
+ const raw=req.headers.get('authorization')?.match(/^Bearer ([a-f0-9]{64})$/)?.[1];
+ if(!raw)return null;
+ for(const actor of ['dot','muse'] as const){
+  const saved=readSetting<string>(`agent_cloud_token:${actor}`);
+  if(saved && /^[a-f0-9]{64}$/.test(saved) && timingSafeEqual(Buffer.from(hash(raw)),Buffer.from(saved)))return actor;
+ }
+ return null;
+}
 export function provisionLocalCredential(actor:Agent) {
  const dir=resolve('.data/agent-credentials');mkdirSync(dir,{recursive:true,mode:0o700});chmodSync(dir,0o700);
  const file=join(dir,`${actor}.json`);let valid=false;

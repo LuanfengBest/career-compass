@@ -2,8 +2,9 @@
 import {useState,useEffect,useRef,useCallback} from 'react';
 import Link from 'next/link';
 import {Heading} from '../components/ui';
+import {recoverableClaimKind} from '../lib/tasks';
 import {prepareDiscoveryCompletion,prepareWorkbenchRequest,readWorkbenchClaim,redactWorkbenchResponse,type WorkbenchClaim} from '../lib/workbench';
-type QueueTask = {id:string;owner:string;kind:string;status:string;title:string;leaseUntil?:string};
+type QueueTask = {id:string;owner:string;kind:string;status:string;title:string;version:number;leaseUntil?:string};
 const claimKey='career-workbench-private-claim';
 async function request(url:string,method='GET',value?:unknown) {
  const r=await fetch(url,{method,headers:method==='POST'?{'Content-Type':'application/json'}:undefined,body:value===undefined?undefined:JSON.stringify(value),cache:'no-store'});
@@ -31,7 +32,7 @@ export default function Page(){
    const v=await request('/api/agents/tasks','POST',{action:'heartbeat',eventId:crypto.randomUUID(),taskId:c.id,claimToken:c.claimToken});
    if(active.current?.claimToken!==c.claimToken)return;
    remember({...c,leaseUntil:v.leaseUntil});setPaused(false);setLastRenewed(new Date().toISOString());setError('');
-  }catch(e){if(active.current?.claimToken===c.claimToken){setPaused(true);setError(e instanceof Error?e.message:'Renewal failed.');}}
+  }catch(e){if(active.current?.claimToken===c.claimToken){setPaused(true);const message=e instanceof Error?e.message:'Renewal failed.';if(message.includes('CLAIM_TOKEN_MISMATCH')||message.includes('CLAIM_NOT_ACTIVE'))remember(null);setError(message);}}
  },[remember]);
  useEffect(()=>{
   let cancelled=false;
@@ -69,14 +70,20 @@ export default function Page(){
   remember(c);setPaused(false);show({ok:true,taskId:c.id,owner:c.owner,kind:c.kind,leaseUntil:c.leaseUntil,credentials:'Saved privately in this tab; do not copy a token.'});
   await renew();
  }
+ async function recover(t:QueueTask){
+  if(active.current)throw Error('Finish your current task before recovering another.');
+  const v=await request('/api/agents/tasks','POST',{action:'recover_claim',taskId:t.id,version:t.version,stopPreviousContext:true});
+  await acceptClaim(v);
+  setSubmitError('');setSubmitStatus('Claim recovered here. Old tabs cannot renew or submit. Continue with the same record eventIds and read back existing receipts.');
+ }
  async function submit(){
   setSubmitError('');setSubmitStatus('Submitting…');
   try {
   if(paused)throw Error('Renewal is paused. Resolve the error and renew before submitting.');
   const value=prepareWorkbenchRequest(endpoint,JSON.parse(payload),active.current,actor||'');
-  if(value.action==='claim'&&endpoint==='/api/agents/tasks'&&active.current)throw Error('Finish the current claim before claiming another task.');
+  if(['claim','recover_claim'].includes(String(value.action))&&endpoint==='/api/agents/tasks'&&active.current)throw Error('Finish the current claim before claiming another task.');
   const v=await request(endpoint,'POST',value);
-  if(endpoint==='/api/agents/tasks'&&value.action==='claim'){await acceptClaim(v);setSubmitStatus('Claim ready; prepare your record.');return;}
+  if(endpoint==='/api/agents/tasks'&&['claim','recover_claim'].includes(String(value.action))){await acceptClaim(v);setSubmitStatus('Claim ready; prepare your record.');return;}
   show(v);setSubmitStatus('Server receipt received. Read back the saved record before marking discovery complete.');
   if(endpoint==='/api/agents/tasks'&&value.action==='heartbeat'&&active.current)remember({...active.current,leaseUntil:v.leaseUntil});
   if(endpoint==='/api/agents/tasks'&&value.action==='report'){remember(null);setPaused(false);setTasks((await request('/api/agents/tasks')).tasks);}
@@ -104,8 +111,8 @@ export default function Page(){
  {actor&&<>
  <section className="panel"><h2>1. Claim your task</h2><div className="button-row"><button disabled={busy} className="button secondary" onClick={()=>void perform(refresh)}>Check my queue</button><button disabled={busy} className="button secondary" onClick={()=>void perform(async()=>show(await request('/api/agents')))}>Read shared context</button><button disabled={busy} className="button secondary" onClick={()=>void perform(async()=>show(await request('/api/agents/guide')))}>Read API guide</button></div>
  <p aria-live="polite">Queue identity: <strong>{actor}</strong> · Last checked: {queueAt?new Date(queueAt).toLocaleString():'Not checked'} · <strong>{tasks.filter(t=>t.owner===actor&&t.status==='queued').length} queued</strong></p>
- {!claim?<div>{tasks.filter(t=>t.owner===actor).map(t=><article className="panel" key={t.id}><strong>{t.title}</strong><p>Task ID: {t.id}<br/>Owner: {t.owner} · Status: {t.status}</p>{t.status==='queued'?<button className="button primary" disabled={busy} onClick={()=>void perform(async()=>{await acceptClaim(await request('/api/agents/tasks','POST',{action:'claim',taskId:t.id,usesLocalBrowser:true}));})}>Claim task {t.id.slice(0,8)}</button>:<span className="muted">{t.status==='blocked'?'Blocked — owner review is needed before retry.':t.status==='claimed'?'Already claimed — use its active tab or resolve the existing claim.':'No action required here.'}</span>}</article>)}{!tasks.some(t=>t.owner===actor)&&<p>No tasks returned for this identity. Check my queue and report the identity and timestamp above.</p>}</div>:<div className="info-note"><strong>{paused?'Renewal paused — resolve the error below':'Claim ready · automatic renewal every 2 minutes'}</strong><p>Task: {claim.id}<br/>Expires: {new Date(claim.leaseUntil).toLocaleString()}<br/>Last renewed: {lastRenewed?new Date(lastRenewed).toLocaleTimeString():'Restored from this tab'}</p><button className="button secondary" disabled={busy} onClick={()=>void perform(renew)}>Renew now</button></div>}
- <p>Keep this tab open and the Mac awake. Closing the tab or sleeping can stop renewal. Expired claims are never revived automatically. Reloading this same tab can restore an unexpired claim; no token is displayed.</p></section>
+ {!claim?<div>{tasks.filter(t=>t.owner===actor).map(t=><article className="panel" key={t.id}><strong>{t.title}</strong><p>Task ID: {t.id}<br/>Owner: {t.owner} · Status: {t.status}</p>{t.status==='queued'?<button className="button primary" disabled={busy} onClick={()=>void perform(async()=>{await acceptClaim(await request('/api/agents/tasks','POST',{action:'claim',taskId:t.id,usesLocalBrowser:true}));})}>Claim task {t.id.slice(0,8)}</button>:t.status==='claimed'&&recoverableClaimKind(t.kind)?<div><p>This task is active in another context. Recover here to invalidate its old claim token. Stop using the old tab; saved records remain intact. Do not run both contexts.</p><button className="button secondary" disabled={busy} onClick={()=>void perform(()=>recover(t))}>Recover task {t.id.slice(0,8)} here</button></div>:<span className="muted">{t.status==='blocked'?'Blocked — owner review is needed before retry.':t.status==='claimed'?'External form/send work is active. Use its original context or reconcile in Tasks; it cannot be moved automatically.':'No action required here.'}</span>}</article>)}{!tasks.some(t=>t.owner===actor)&&<p>No tasks returned for this identity. Check my queue and report the identity and timestamp above.</p>}</div>:<div className="info-note"><strong>{paused?'Renewal paused — resolve the error below':'Claim ready · automatic renewal every 2 minutes'}</strong><p>Task: {claim.id}<br/>Expires: {new Date(claim.leaseUntil).toLocaleString()}<br/>Last renewed: {lastRenewed?new Date(lastRenewed).toLocaleTimeString():'Restored from this tab'}</p><button className="button secondary" disabled={busy} onClick={()=>void perform(renew)}>Renew now</button></div>}
+ <p>Keep this tab open and the Mac awake. Closing the tab or sleeping can stop renewal. Expired claims are never revived automatically. Reloading this tab restores its unexpired claim. In a different tab, use Recover task for live discovery/read/draft work. Recovery invalidates the old token; it does not approve external actions. No token is displayed.</p></section>
  <section className="panel"><h2>2. Submit one record</h2><p>Paste one real request at a time. Omit <code>claimToken</code>, <code>taskId</code> and <code>batchId</code>: this workbench adds them from your active claim. Keep the record&apos;s stable <code>eventId</code>. Existing conflicting IDs are rejected.</p>
  <p>Job format: <code>{'{"eventId":"stable-id","type":"opportunity","job":{...}}'}</code><br/>Contact format: <code>{'{"eventId":"stable-id","type":"contact","contact":{...}}'}</code>. Each request contains one record; <code>action: result</code> is not supported.</p>
  <button type="button" className="button secondary" disabled={busy} onClick={()=>void perform(async()=>{const guide=await request('/api/agents/guide');setFormats(JSON.stringify({opportunity:guide.examples.opportunity,contact:guide.examples.contact},null,2));})}>Show job and contact format examples</button>

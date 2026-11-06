@@ -1,5 +1,5 @@
 import {sendApprovedDrafts} from "../../lib/server/bulk-outreach";
-import { provisionLocalCredential, localCredentialConfigured, revokeBrowserSessions, browserConnectionConfigured } from "../../lib/server/agent-connection";
+import { provisionLocalCredential, localCredentialConfigured, revokeBrowserSessions, browserConnectionConfigured, issueCloudCredential } from "../../lib/server/agent-connection";
 import { body, failure, guard, HttpError, json } from "../../lib/server/http";
 import {
   drafts,
@@ -22,7 +22,9 @@ export async function GET(req: Request) {
       syncAt: readSetting("portal_sync_at"),
       agents: (["dot", "muse"] as const).map((actor) => ({
         actor,
-        configured: !!readSetting(`agent_token:${actor}`) || browserConnectionConfigured(actor),
+        configured: !!readSetting(`agent_token:${actor}`) || !!readSetting(`agent_cloud_token:${actor}`) || browserConnectionConfigured(actor),
+        cloudCredential: !!readSetting(`agent_cloud_token:${actor}`),
+        cloudCheck: readSetting<string>(`agent_cloud_check:${actor}`),
         localCredential: localCredentialConfigured(actor),
         lastSeen: readSetting(`agent_seen:${actor}`),
       })),
@@ -37,12 +39,20 @@ export async function POST(req: Request) {
     const v = (await body(req)) as Record<string, unknown>;
     if (!v || typeof v !== "object" || Array.isArray(v))
       throw new HttpError(400, "Expected a JSON object.");
-    if (v.action === "connect" || v.action === "disconnect" || v.action === "local-connect") {
+    if (["connect", "disconnect", "local-connect", "cloud-connect", "cloud-disconnect"].includes(String(v.action))) {
       if (v.actor !== "dot" && v.actor !== "muse")
         throw new HttpError(400, "Invalid agent.");
       if(v.action === "local-connect") return json(provisionLocalCredential(v.actor));
+      if(v.action === "cloud-connect") return json(issueCloudCredential(v.actor));
+      if(v.action === "cloud-disconnect") {
+        removeSetting(`agent_cloud_token:${v.actor}`);
+        removeSetting(`agent_cloud_check:${v.actor}`);
+        return json({ok:true});
+      }
       if (v.action === "disconnect") {
         removeSetting(`agent_token:${v.actor}`);
+        removeSetting(`agent_cloud_token:${v.actor}`);
+        removeSetting(`agent_cloud_check:${v.actor}`);
         revokeBrowserSessions(v.actor);
         return json({ ok: true });
       }

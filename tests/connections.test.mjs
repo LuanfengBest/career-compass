@@ -31,4 +31,24 @@ test('browser session enforces origin, ends on logout and actor-wide revoke; bea
 test('browser session expires after twelve hours',()=>{
  const token=c.startBrowserSession('muse'),now=Date.now;try{Date.now=()=>now()+13*3600000;assert.equal(c.browserSessionActor(request(token)),null);}finally{Date.now=now;}
 });
+test('cloud credentials require HTTPS deployment, isolate actors and local credentials, and can be revoked',()=>{
+ assert.throws(()=>c.issueCloudCredential('muse'),/Deploy/);
+ const local=c.provisionLocalCredential('dot');
+ const localToken=unseal(JSON.parse(readFileSync(local.path,'utf8')).sealed).token;
+ const owner=require('../.test-build/server/owner-auth.js'),http=require('../.test-build/server/http.js');
+ process.env.DEPLOYMENT_MODE='cloud';process.env.APP_URL='https://career.example.com';
+ process.env.OWNER_SESSION_SECRET='8'.repeat(64);process.env.OWNER_PASSWORD_HASH=owner.hashPassword('fixture-private-password');
+ const req=(token,path='/api/agents/tasks',method='GET')=>new Request(`https://career.example.com${path}`,{method,headers:{host:'career.example.com',authorization:`Bearer ${token}`}});
+ try{
+  const muse=c.issueCloudCredential('muse'),dot=c.issueCloudCredential('dot');
+  assert.equal(p.agentAuth(req(muse.token)),'muse');assert.equal(p.agentAuth(req(dot.token)),'dot');
+  assert.equal(p.agentAuth(req(muse.token,'/api/agents/tasks','POST')),'muse');
+  assert.equal(p.agentAuth(req(localToken)),'dot');
+  assert.notEqual(d.readSetting('agent_cloud_token:muse'),muse.token);
+  assert.throws(()=>http.guard(req(muse.token,'/api/portal')),e=>e.status===401);
+  const replacement=c.issueCloudCredential('muse');assert.throws(()=>p.agentAuth(req(muse.token)),/revoked/);
+  assert.equal(p.agentAuth(req(replacement.token)),'muse');assert.equal(p.agentAuth(req(dot.token)),'dot');
+  d.removeSetting('agent_cloud_token:muse');assert.throws(()=>p.agentAuth(req(replacement.token)),/revoked/);
+ }finally{delete process.env.DEPLOYMENT_MODE;process.env.APP_URL='http://127.0.0.1:3000';}
+});
 test.after(()=>{d.db().close();process.chdir(cwd);rmSync(dir,{recursive:true,force:true});});

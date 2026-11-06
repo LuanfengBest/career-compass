@@ -13,7 +13,7 @@ export function readWorkbenchClaim(value: unknown): WorkbenchClaim | null {
 export function prepareWorkbenchRequest(endpoint: string, value: unknown, claim: WorkbenchClaim | null, actor: string, now = Date.now()) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw Error('Enter one JSON object per request.');
   const v = {...value as Record<string,unknown>};
-  if (endpoint === '/api/agents/tasks' && !['begin_discovery_round','register_worker','claim','heartbeat','report'].includes(String(v.action))) {
+  if (endpoint === '/api/agents/tasks' && !['begin_discovery_round','register_worker','claim','recover_claim','heartbeat','report'].includes(String(v.action))) {
     throw Error('Unsupported task action. Completion requires action:"report", status:"completed", eventId, summary and coverage. Use the Complete discovery form for a discovery task.');
   }
   if (endpoint === '/api/agents' && !['opportunity','contact','draft','progress','outreach_report','interpretation','application_analysis'].includes(String(v.type))) {
@@ -21,7 +21,7 @@ export function prepareWorkbenchRequest(endpoint: string, value: unknown, claim:
   }
   const needsClaim = endpoint === '/api/agents/tasks' ? ['heartbeat','report'].includes(String(v.action)) : endpoint === '/api/agents' && ['opportunity','contact','draft'].includes(String(v.type));
   if (!needsClaim) return v;
-  if (!claim || claim.owner !== actor) throw Error('Claim your task using its Claim task button first.');
+  if (!claim || claim.owner !== actor) throw Error('This tab has no active claim. Check my queue, then Claim the queued task or Recover the live read/draft task here. This is a local validation error; no report was sent.');
   if (Date.parse(claim.leaseUntil) <= now) throw Error('The claim expired. Stop and request requeue; no automatic retry.');
   if (v.taskId !== undefined && v.taskId !== claim.id) throw Error('JSON taskId differs from the selected claim.');
   if (v.batchId !== undefined && v.batchId !== claim.batchId) throw Error('JSON batchId differs from the selected claim.');
