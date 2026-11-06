@@ -78,11 +78,15 @@ export function contactSummary(c: Contact, data: PortalSnapshot) {
     .filter((e) => e.contactId === c.id)
     .sort((a, b) => b.at.localeCompare(a.at));
   const factual = events.filter((e) => e.actor === "gmail");
-  const invalid = factual.some(
+  const verifiedInvalid = factual.some(
     (e) => e.kind === "invalid_address" && e.email === c.email,
   );
+  const reportedInvalid = events.some(
+    (e) => e.kind === "invalid_address_reported" && e.email === c.email,
+  );
+  const invalid = verifiedInvalid || reportedInvalid;
   const incoming = factual.some((e) => e.kind === "incoming");
-  const replied = events.some((e) => e.kind === "reply_confirmed");
+  const replied = events.some((e) => ["reply_confirmed", "reply_reported", "linkedin_reply_reported"].includes(e.kind));
   const sent =
     events.some(
       (e) =>
@@ -104,8 +108,10 @@ export function contactSummary(c: Contact, data: PortalSnapshot) {
     emailUrl,
     emailLabel: !c.email
       ? "Email not found"
-      : invalid
+      : verifiedInvalid
         ? "Invalid address · bounced"
+        : reportedInvalid
+          ? "Bounced · reported in imported history"
         : `${c.emailSource || "Inferred"} address`,
     stage: replied
       ? "Replied"

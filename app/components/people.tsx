@@ -232,7 +232,9 @@ export function People() {
                     : "Profile not confirmed"}
                 </span>
                 <small>
-                  {summary.events.some(
+                  {summary.events.some((e) => e.kind === "linkedin_reply_reported")
+                    ? "Reply · reported in imported history"
+                    : summary.events.some(
                     (e) => e.kind === "linkedin_incoming_reported",
                   )
                     ? "Incoming message · agent reported"

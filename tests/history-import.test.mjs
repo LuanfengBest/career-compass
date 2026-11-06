@@ -1,0 +1,23 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {createRequire} from 'node:module';
+import {mergeHistory} from '../scripts/import-history.mjs';
+const require=createRequire(import.meta.url);
+const {contactSummary}=require('../.test-build/portal.js');
+test('history import is idempotent, preserves edits and separates LinkedIn replies from email bounces',()=>{
+ const existing={id:'canonical',name:'Edited name',email:'test@example.com',linkedin:'',evidence:'Live evidence',emailStatus:'Not contacted',draftAssignment:'dot'};
+ const original={jobs:[{id:'existing-job',role:'Edited title',sourceEvidence:'Live JD'}],contacts:[existing],applications:[],outreach:[]};
+ const manifest={importId:'fixture',jobs:[{existingId:'existing-job',job:{id:'import-job',sourceEvidence:'Historical submission'},application:{stage:'Applied',notes:'User report',appliedAt:'2026-10-13'}}],contacts:[{existingId:'canonical',contact:{id:'import-person',email:'test@example.com',linkedin:'https://www.linkedin.com/in/test',evidence:'Historical evidence',emailStatus:'Stopped',emailSource:'Inferred'},bounced:true,replyChannel:'linkedin',note:'Willing to chat'}]};
+ const one=mergeHistory(original,manifest,'2026-11-06T12:00:00Z');
+ const two=mergeHistory(one.workspace,manifest,'2026-11-06T12:00:00Z');
+ assert.deepEqual(one,two);
+ assert.equal(one.workspace.contacts.length,1);assert.equal(one.workspace.contacts[0].draftAssignment,'dot');
+ assert.equal(one.workspace.contacts[0].name,'Edited name');assert.equal(one.workspace.jobs[0].role,'Edited title');
+ assert.equal(one.workspace.applications[0].jobId,'existing-job');
+ assert.equal(one.workspace.contacts[0].emailStatus,'Stopped');
+ const s=contactSummary(one.workspace.contacts[0],{events:one.events,drafts:[]});
+ assert.equal(s.replied,true);assert.equal(s.invalid,true);assert.equal(s.incoming,false);
+ assert.match(s.emailLabel,/reported/);assert.equal(s.emailUrl,undefined);
+ assert.equal(one.events.filter(e=>e.actor==='gmail').length,0);
+ assert.throws(()=>mergeHistory({...original,contacts:[{...existing,email:'different@example.com'}]},manifest,'2026-11-06'),/conflicts/);
+});
