@@ -11,6 +11,8 @@ export type TaskStatus =
   | "queued"
   | "claimed"
   | "review"
+  | "needs_login"
+  | "needs_input"
   | "completed"
   | "blocked"
   | "uncertain"
@@ -66,6 +68,7 @@ export type WorkerStatus = {
   registeredAt?: string;
 };
 export type TaskSnapshot = {
+  nextActions?: { taskId: string; kind: TaskKind; owner: Agent; instruction: string }[];
   batches: Batch[];
   tasks: Task[];
   discoveries: Discovery[];
@@ -82,6 +85,21 @@ export const taskLabels: Record<TaskKind, string> = {
 };
 export const irreversibleTask = (t: Task) =>
   t.kind === "application_submit" || t.kind === "linkedin_send";
+
+export const taskStatusLabel = (status: TaskStatus) =>
+  status === "needs_login" ? "Sign up / Sign in" : status === "needs_input" ? "Needs your answers" : status;
+
+// Use structured agent evidence first. The summary fallback repairs legacy
+// reports that incorrectly used review for an unopened authentication screen.
+export function preparationStatus(result: Task["result"]): TaskStatus {
+  if (result?.blocker === "login") return "needs_login";
+  if (result?.blocker === "user_input" ||
+      (Array.isArray(result?.unansweredFields) && result.unansweredFields.length)) return "needs_input";
+  if (result?.blocker === "technical") return "blocked";
+  if (result?.formState === "filled" && typeof result.answers === "string" && result.answers.trim() && result.evidenceUrl) return "review";
+  if (/sign[ -]?in|log[ -]?in|create (?:an )?account|registration|authentication/i.test(result?.summary || "")) return "needs_login";
+  return "needs_input";
+}
 
 // These tasks only read data or save drafts. Form preparation can already have
 // changed an external form, so it deliberately requires owner reconciliation.

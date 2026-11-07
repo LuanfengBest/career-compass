@@ -8,6 +8,7 @@ import { usePortal, portalAction } from "./portal-data";
 import { taskAction } from "./task-center";
 import {BulkOutreach} from "./bulk-outreach";
 import { Badge, Heading } from "./ui";
+import { DraftProgress } from "./draft-progress";
 export function OutreachCenter({
   initialContact,
 }: {
@@ -74,16 +75,7 @@ export function OutreachCenter({
               linkedin={safeLinkedInUrl(contact?.linkedin || "")}
             />
           ))}
-          {!relevant.length && (
-            <section className="panel">
-              <h2>Waiting for an agent draft</h2>
-              <p>
-                {contact
-                  ? `${draftOwner(contact) || "Your agent"} should submit this contact's draft through the portal connection.`
-                  : "No contact selected."}
-              </p>
-            </section>
-          )}
+          {!relevant.length && contact && <DraftProgress contactId={contact.id} />}
           {legacy?.draft && (
             <details className="panel">
               <summary>Previous local draft (retained)</summary>

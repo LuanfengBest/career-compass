@@ -34,11 +34,14 @@ test('both native reports are required before deduplicated preparation; never au
   const queued=s.allTasks().find(t=>t.batchId===batch&&t.owner===actor);
   const t=a.agentTaskAction(actor,{action:'claim',taskId:queued.id,usesLocalBrowser:false}).task;
   p.submitAgent(actor,{eventId:`job-${actor}`,type:'opportunity',batchId:batch,taskId:t.id,claimToken:t.claimToken,job:{company:'Example',role:'Product Analyst New Grad',family:'DA',region:'United States',location:'NY',jdUrl:'https://example.com/careers/1',fit:'Fixture evidence',summary:'2027 full-time entry-level'}});
+  p.submitAgent(actor,{eventId:`person-${actor}`,type:'contact',batchId:batch,taskId:t.id,claimToken:t.claimToken,contact:{externalId:'shared-fixture',evidence:'Fixture evidence',source:'https://www.linkedin.com/in/shared-fixture',relationship:'Professional contact',name:'Shared Fixture Person',company:'Example',title:'Analyst',linkedin:'https://www.linkedin.com/in/shared-fixture',reason:'Fixture evidence',email:'person@example.com'}});
   a.agentTaskAction(actor,{action:'report',taskId:t.id,claimToken:t.claimToken,eventId:`finish-${actor}`,status:'completed',summary:'Fixture completed',coverage:'Fixture sources only'});
   if(actor==='dot')assert.equal(s.allTasks().some(t=>t.kind==='application_prepare'),false);
  }
  assert.equal(s.allBatches().find(b=>b.id===batch).status,'released');
  const prepared=s.allTasks().filter(t=>t.kind==='application_prepare');assert.equal(prepared.length,1);assert.equal(prepared[0].owner,'dot');
+ const drafts=s.allTasks().filter(t=>t.kind==='draft');assert.equal(drafts.length,1);assert.equal(drafts[0].owner,'dot');
+ const actions=s.taskSnapshot('dot').nextActions;assert.ok(actions.some(x=>x.taskId===prepared[0].id));assert.ok(actions.some(x=>x.taskId===drafts[0].id));
  assert.equal(s.allTasks().some(t=>t.kind==='application_submit'),false);
  assert.equal(d.readWorkspace().workspace.applications.length,0);
  const t=a.agentTaskAction('dot',{action:'claim',taskId:prepared[0].id,usesLocalBrowser:false}).task;

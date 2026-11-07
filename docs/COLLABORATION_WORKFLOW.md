@@ -1,3 +1,18 @@
+## Preparation and automatic continuation — 2026-11-07.2
+
+- Native daily schedules remain in Dot and Muse. The portal does not launch either agent.
+- Discovery results must be uploaded and read back before completing discovery; do not wait for employer form filling before uploading jobs.
+- Both discovery reports complete → canonical deduplication → automatic preparation/draft assignment. Shared/Dot discoveries belong to Dot; Muse-only discoveries belong to Muse, preserving existing assignments.
+- Agents read queue `nextActions`, claim their work, execute it, save/read back results and continue to the next task. Reading the queue alone is not execution. Queue polling remains the external agent's responsibility.
+- Application preparation reports use `needs_login` / `blocker: login` for employer authentication, `needs_input` / `blocker: user_input` plus `unansweredFields` for missing answers, and `blocked` / `blocker: technical` for tool failures.
+- `review` requires `formState: filled`, actual entered answers, an evidence URL and no unresolved required questions. The server prevents final approval of incomplete forms and repairs legacy mislabeled review records while retaining history.
+- After login in the **agent's cloud browser**, the user clicks **I've signed in — continue filling**. The same task/owner returns to the queue with current profile, previous evidence and resume instructions. This does not authorize submission. Personal Chrome login does not establish the cloud browser's session.
+- Same-owner versioned `amend_preparation` can update preparation evidence after a report without pretending to re-execute the form. Concurrent user decisions and approved submissions are fenced.
+- Outreach shows the actual draft task or the unfinished discovery round, including the responsible agent. Missing completion reports are not fabricated to release a batch.
+- Final email sending and employer application submission still require review of the actual recipient/message or fully filled answers respectively.
+
+The sections below document earlier protocol history; the current guide and policy supersede conflicting older steps.
+
 # 原生日常计划 + 临时 Tasks — policy 2026-11-05.6
 
 本节覆盖历史阶段的每日默认计划说明。用户于 2026-11-05 明确：日常任务在 Dot / Muse 各自设置，网站不规定每天 10 个岗位 / 10 位联系人，也不负责启动日常搜索。

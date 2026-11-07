@@ -40,15 +40,46 @@ test('legacy expiry blocks recover; explicit blocks, cancelled rounds and extern
  assert.equal(state(safe),'queued');assert.equal(state(explicit),'blocked');assert.equal(state(prep),'blocked');assert.equal(state(send),'uncertain');assert.equal(state(cancelled),'blocked');
 });
 test('review amendment is versioned, same-owner, idempotent, and cannot approve or overwrite submission',()=>{
- const t=s.newTask('application_prepare','muse','Prepared form',{}, {entityId:'fixture-job',status:'review',result:{summary:'Old report',answers:'Old answers',formState:'not_opened'}});s.saveTask(t);
+ const t=s.newTask('application_prepare','muse','Prepared form',{}, {entityId:'fixture-job',status:'blocked',result:{summary:'Old report',answers:'Old answers',formState:'not_opened'}});s.saveTask(t);
  const input={action:'amend_preparation',taskId:t.id,version:t.version,eventId:id(),summary:'Actual partial form',answers:'Observed answers; missing work authorization response',formState:'partially_filled',evidenceUrl:'https://example.com/application'};
  assert.throws(()=>a.agentTaskAction('dot',input),/assigned agent/);
  assert.throws(()=>a.agentTaskAction('muse',{...input,version:99}),/changed/);
- const r=a.agentTaskAction('muse',input);assert.equal(r.task.status,'review');assert.equal(r.task.result.formState,'partially_filled');
+ const r=a.agentTaskAction('muse',input);assert.equal(r.task.status,'needs_input');assert.equal(r.task.result.formState,'partially_filled');
  assert.deepEqual(a.agentTaskAction('muse',input),r);
  assert.equal(s.taskDb().prepare('SELECT body FROM task_requests WHERE id=?').get(`preparation-history:${t.id}:1`)!==undefined,true);
- assert.throws(()=>a.userTaskAction({action:'approve_application',taskId:t.id,version:r.task.version,answers:'Reviewed'}),/actual application form must be filled/);
+ assert.throws(()=>a.userTaskAction({action:'approve_application',taskId:t.id,version:r.task.version,answers:'Reviewed'}),/Review a prepared application first/);
  s.saveTask(s.newTask('application_submit','muse','Approved submit',{}, {entityId:t.entityId}));
  assert.throws(()=>a.agentTaskAction('muse',{...input,eventId:id(),version:r.task.version,formState:'filled'}),/already approved/);
+});
+test('legacy login report cannot be approved; user continuation preserves identity, evidence and owner',()=>{
+ const old=s.newTask('application_prepare','dot','Sony fixture',{}, {entityId:'sony-fixture',status:'review',result:{summary:'Create Account/Sign In; candidate form not opened',answers:'No answers entered',formState:'not_opened',evidenceUrl:'https://example.com/signin'}});s.saveTask(old);
+ const migrated=s.taskSnapshot().tasks.find(t=>t.id===old.id);
+ assert.equal(migrated.status,'needs_login');assert.equal(migrated.version,old.version+1);
+ assert.throws(()=>a.userTaskAction({action:'approve_application',taskId:old.id,version:migrated.version,answers:'No answers'}),/Review a prepared application first/);
+ assert.throws(()=>a.userTaskAction({action:'resume_preparation',taskId:old.id,version:old.version}),/changed/);
+ const r=a.userTaskAction({action:'resume_preparation',taskId:old.id,version:migrated.version,note:'Signed in; verify cloud session'});
+ assert.equal(r.task.id,old.id);assert.equal(r.task.owner,'dot');assert.equal(r.task.status,'queued');
+ assert.deepEqual(r.task.result,old.result);assert.equal(r.task.input.resume.previousStatus,'needs_login');
+ assert.equal(s.allTasks().some(t=>t.entityId===old.entityId&&t.kind==='application_submit'),false);
+ assert.throws(()=>a.agentTaskAction('muse',{action:'claim',taskId:old.id,usesLocalBrowser:false}),/not queued for you/);
+ const active=claim(r.task);
+ const partial=a.agentTaskAction('dot',{action:'report',taskId:active.id,claimToken:active.claimToken,eventId:id(),status:'review',summary:'Form filled except a required answer',answers:'Entered verified fields',formState:'filled',unansweredFields:['Exact work authorization question'],evidenceUrl:'https://example.com/application'});
+ assert.equal(partial.task.status,'needs_input');
+ const resumed=a.userTaskAction({action:'resume_preparation',taskId:active.id,version:partial.task.version,note:'See latest verified profile'}).task;
+ const filled=claim(resumed);
+ const ready=a.agentTaskAction('dot',{action:'report',taskId:filled.id,claimToken:filled.claimToken,eventId:id(),status:'review',summary:'Actual full form filled, stopped before submission',answers:'Actual field answers and resume version',formState:'filled',blocker:'none',unansweredFields:[],evidenceUrl:'https://example.com/application/review'});
+ assert.equal(ready.task.status,'review');
+ assert.equal(s.allTasks().some(t=>t.entityId===old.entityId&&t.kind==='application_submit'),false);
+});
+test('new login reports normalize review, explicit technical blocks remain blocked, and queue prescribes continuation',()=>{
+ for(const [status,summary,expected] of [['review','Sign in required','needs_login'],['needs_login','Authentication required','needs_login'],['blocked','Browser failed to open','blocked']]){
+  const t=s.newTask('application_prepare','muse','Assistance fixture',{});s.saveTask(t);const active=claim(t);
+  const result=a.agentTaskAction('muse',{action:'report',taskId:t.id,claimToken:active.claimToken,eventId:id(),status,summary,formState:'not_opened',evidenceUrl:'https://example.com/login'});
+  assert.equal(result.task.status,expected);
+ }
+ const draft=s.newTask('draft','muse','Next draft',{});s.saveTask(draft);
+ const snapshot=s.taskSnapshot('muse');
+ assert.ok(snapshot.nextActions.some(t=>t.taskId===draft.id&&t.instruction.includes('save the personalized draft')));
+ assert.ok(snapshot.nextActions.every(t=>t.owner==='muse'));
 });
 test.after(()=>rmSync(dir,{recursive:true,force:true}));

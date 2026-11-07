@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { draftOwner } from "../lib/portal";
 import { useWorkspace } from "../lib/store";
-import { type TaskSnapshot, type Task, taskLabels } from "../lib/tasks";
+import { type TaskSnapshot, type Task, taskLabels, taskStatusLabel } from "../lib/tasks";
 import { Badge, Heading } from "./ui";
 const empty: TaskSnapshot = {
   tasks: [],
@@ -166,7 +166,7 @@ export function TaskCenter() {
           [
             "Needs attention",
             data.tasks.filter((t) =>
-              ["blocked", "uncertain"].includes(t.status),
+              ["blocked", "uncertain", "needs_login", "needs_input"].includes(t.status),
             ).length,
           ],
         ].map(([label, n]) => (
@@ -488,11 +488,13 @@ export function TaskCenter() {
                 "claimed",
                 "review",
                 "blocked",
+                "needs_login",
+                "needs_input",
                 "uncertain",
                 "completed",
                 "cancelled",
               ].map((s) => (
-                <option key={s}>{s}</option>
+                <option key={s} value={s}>{s === "needs_login" ? "Sign up / Sign in" : s === "needs_input" ? "Needs your answers" : s}</option>
               ))}
             </select>
           </label>
@@ -525,7 +527,7 @@ function TaskCard({
     [reason, setReason] = useState(""),
     [verified, setVerified] = useState(false);
   return (
-    <article className="integration-row task-card">
+    <article className="integration-row task-card" id={`task-${t.id}`}>
       <div className="section-title">
         <div>
           <strong>{t.title}</strong>
@@ -534,7 +536,7 @@ function TaskCard({
             {new Date(t.updatedAt).toLocaleString()}
           </p>
         </div>
-        <Badge>{t.status}</Badge>
+        <Badge>{taskStatusLabel(t.status)}</Badge>
       </div>
       {t.result && <p className="message-preview">{t.result.summary}</p>}
       {t.result?.evidenceUrl && (
@@ -547,6 +549,21 @@ function TaskCard({
           View reported evidence ↗
         </a>
       )}
+      {t.kind === "application_prepare" && ["needs_login", "needs_input"].includes(t.status) && (
+        <div className="stack">
+          <h3>{t.status === "needs_login" ? "Sign up / Sign in, then continue filling" : "Resolve missing answers, then continue filling"}</h3>
+          <p>{t.status === "needs_login"
+            ? `Complete sign-in inside ${t.owner}'s employer-site cloud browser. Signing in on your own computer does not sign in that browser. Then queue the same task below; ${t.owner} will verify access and continue the saved form on its next queue check.`
+            : "Update your profile in Settings or describe the missing facts below. The assigned agent will continue the actual application before requesting final review."}</p>
+          {Array.isArray(t.result?.unansweredFields) && <ul>{(t.result.unansweredFields as string[]).map((q, i) => <li key={i}>{q}</li>)}</ul>}
+          <label>Note for the agent (no passwords)<textarea value={reason} onChange={e => setReason(e.target.value)} maxLength={4000} /></label>
+          <button className="button primary" disabled={busy} onClick={() => act({action: "resume_preparation", taskId: t.id, version: t.version, note: reason || undefined})}>
+            {t.status === "needs_login" ? "I've signed in — continue filling" : "Information ready — continue filling"}
+          </button>
+          <p className="muted">This resumes preparation with the same owner. It does not approve or submit the application.</p>
+        </div>
+      )}
+      {t.kind === "application_prepare" && t.status === "queued" && Boolean(t.input.resume) && <p>Continuation queued for {t.owner}. The agent must claim it on its next queue check and verify the existing form before continuing.</p>}
       {t.status === "review" && t.kind === "application_prepare" && (
         <>
           <p>Form state (Agent reported): {String(t.result?.formState || "not_opened").replaceAll("_", " ")}. This is not a submission receipt.</p>
@@ -589,7 +606,7 @@ function TaskCard({
               Retry after resolving issue
             </button>
           )}
-        {["queued", "blocked", "review"].includes(t.status) && (
+        {["queued", "blocked", "review", "needs_login", "needs_input"].includes(t.status) && (
           <button
             className="button secondary"
             disabled={busy}

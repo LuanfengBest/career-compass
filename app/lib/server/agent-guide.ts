@@ -1,7 +1,7 @@
 import { agentPolicy } from "../agent-policy";
 export function agentGuide() {
   return {
-      version: 6,
+      version: 7,
       policy: agentPolicy,
       endpoint: "/api/agents",
       authentication: "Authorization: Bearer <your own agent token>",
@@ -26,12 +26,13 @@ export function agentGuide() {
           "usesLocalBrowser=true reserves shared local Chrome. Respect 409 conflicts. Cloud-only tools cannot reach this localhost unless a real local HTTP tool is available.",
         recovery: "POST action recover_claim with taskId, current version and stopPreviousContext:true. Same authenticated owner only; live discovery/draft/mail_review/linkedin_sync only. Stop the old context. Response contains a new private claimToken; every old token is invalid. Expired discovery/draft/mail_review/linkedin_sync tasks (including legacy expiry-only blocks) automatically requeue on queue reads. Claim again and read back saved records before continuing. Explicit blocks and application preparation/sends/submissions do not auto-retry. Refresh before any second attempt; do not create a new batch.",
         discoveryOrder: "Upload jobs and contacts immediately during discovery, before filling forms or drafting. Read back canonical IDs, then report discovery completed with coverage/gaps. Both completed reports trigger automatic deduplication/assignment for autoRelease batches. Continue your assigned queued preparation/draft work; do not wait for a new user instruction. A completed search in chat or a private tracker is not a completed portal report.",
-        preparationUpdates: "If a preparation task is already review, do not try to claim it again just to upload later evidence. Use amend_preparation with its current version and actual answers/formState/evidenceUrl. This only updates the report, keeps review status and never authorizes submission. It is not permission to repeat browser actions. Existing approved submissions cannot be amended.",
+        preparationUpdates: "For a preparation in review, needs_login, needs_input or blocked, use amend_preparation with current version and actual answers/formState/evidenceUrl to save later evidence without reclaiming. Include blocker (none/login/user_input/technical) and unansweredFields. Only a filled form with no outstanding blocker or required unanswered field becomes review. This never authorizes submission. It is not permission to repeat browser actions. Existing approved submissions cannot be amended.",
         examples: {
           amend_preparation: {
             action: "amend_preparation", taskId: "own application_prepare task awaiting review", version: 3,
             eventId: "stable-amendment-id", summary: "Updated observed preparation; not submitted",
             formState: "partially_filled", answers: "Actual answers, resume/version and unresolved fields",
+            blocker: "user_input", unansweredFields: ["Exact required question still unanswered"],
             evidenceUrl: "https://employer.example/actual-job",
           },
           begin_discovery_round: {
@@ -45,7 +46,7 @@ export function agentGuide() {
           claim: {
             action: "claim",
             taskId: "queued task ID",
-            usesLocalBrowser: true,
+            usesLocalBrowser: false,
           },
           recover_claim: {
             action: "recover_claim", taskId: "own live read/draft task ID",
@@ -73,9 +74,25 @@ export function agentGuide() {
             claimToken: "returned private token",
             status: "review",
             summary: "Prepared; not submitted",
-            formState: "filled | partially_filled | not_opened (choose actual state)",
+            formState: "filled",
+            blocker: "none",
+            unansweredFields: [],
             answers:
-              "All answers, resume/version, unresolved fields. Do not guess personal facts.",
+              "Actual entered answers and uploaded resume/version. No unresolved required fields; no guessed personal facts.",
+            evidenceUrl: "https://employer.example/actual-job",
+          },
+          application_needs_login: {
+            action: "report", eventId: "stable-login-blocker", taskId: "claimed preparation ID",
+            claimToken: "returned private token", status: "needs_login", blocker: "login",
+            formState: "not_opened", summary: "Employer form requires sign-in in the agent's cloud browser.",
+            answers: "No answers entered or resume uploaded.", evidenceUrl: "https://employer.example/signin",
+          },
+          application_needs_answers: {
+            action: "report", eventId: "stable-missing-answer", taskId: "claimed preparation ID",
+            claimToken: "returned private token", status: "needs_input", blocker: "user_input",
+            formState: "partially_filled", summary: "Saved partial form; required answer missing.",
+            answers: "Only the actual entered answers and uploaded files.",
+            unansweredFields: ["Exact employer question needing the user's answer"],
             evidenceUrl: "https://employer.example/actual-job",
           },
           submitted_application: {
@@ -134,7 +151,7 @@ export function agentGuide() {
           "Daily routines run in each native agent independently of temporary Tasks. begin_discovery_round joins/creates coordination records using an agreed roundKey; it creates no schedule, daily quota, worker registration or sending authorization. Read the returned brief, then claim your discovery record. Both agents use the same key per sweep and search the full scope. Add batchId, taskId and claimToken to discoveries. Historical backfill may use the ingestion endpoint without a batch when not executing a claimed discovery task. daily_tick is retired (410).",
           "After BOTH complete, new rounds (including one-off batches) auto-release preparation. Check batch.autoRelease: legacy manual batches still await owner release. This releases preparation only, never sending or final submission. The server assigns Dot shared/Dot-only records and Muse Muse-only records. Existing sends/submissions are skipped; possible duplicates are blocked. Late discoveries never steal an assigned execution task.",
           "A draft task may also be requested directly for an existing contact. Each task creates a separate draft variant and preserves older user edits. Claim a draft task; submit its draft to /api/agents including taskId and claimToken, then report completed. Preserve user edits. Do not send from a draft task.",
-          "Application preparation researches and fills a supported form without final submission, then reports review with all answers, actual formState and evidence. The user edits/approves in Tasks; a separate application_submit task is created. Only that claim authorizes the approved submission.",
+          "Application preparation researches and fills a supported form without final submission, then reports review ONLY for a fully filled form with all answers and evidence. If authentication blocks filling, report needs_login with blocker:login and the real login URL; missing personal facts use needs_input and unansweredFields; technical failures use blocked. The user signs into YOUR cloud browser and clicks continue filling; this queues the SAME task for you. Claim it on your next poll, inspect the saved form and continue automatically without requesting another authorization. The user edits/approves in Tasks; a separate application_submit task is created. Only that claim authorizes the approved submission.",
           "linkedin_send contains the exact approved draft text/version/profile. Verify identity, send once, then report completed with evidenceUrl and actual receipt. If blocked before any action, state noActionTaken=true. Any uncertain outcome is held for user reconciliation.",
           "mail_review: read original cached mail through /api/agents?applicationMail=<id>, submit application_analysis / interpretation. Only confirmed receipts and stage updates count. Check Sent and bounce evidence, not only replies. Report checked scope and missing evidence.",
           "All task reports use stable eventId across retries. Read back after writes. Report only visible observations; successful task reports are not independent Gmail delivery confirmation.",

@@ -5,6 +5,7 @@ import type { Agent } from "../portal";
 import {
   irreversibleTask,
   recoverableClaimKind,
+  preparationStatus,
   type Task,
   type Batch,
   type Discovery,
@@ -145,6 +146,13 @@ export function expireClaims() {
   const batches = allBatches();
   const legacyExpiry = "Claim expired. Check the external page before retrying; no automatic retry.";
   for (const t of allTasks()) {
+    if (t.kind === "application_prepare" && t.status === "review" && preparationStatus(t.result) !== "review") {
+      taskDb().prepare("INSERT OR IGNORE INTO task_requests VALUES (?,?)").run(`preparation-history:${t.id}:${t.version}`, JSON.stringify({ task: publicTask(t) }));
+      t.status = preparationStatus(t.result);
+      t.version++;
+      t.updatedAt = new Date().toISOString();
+      saveTask(t);
+    }
     const resumable = recoverableClaimKind(t.kind) && (!t.batchId || batches.some(b =>
       b.id === t.batchId && b.status !== "cancelled" && (t.kind !== "discover" || b.status === "discovering")));
     const expired = t.status === "claimed" && (!t.leaseUntil || Date.parse(t.leaseUntil) <= Date.now());
@@ -175,6 +183,16 @@ export function taskSnapshot(actor?: Agent): TaskSnapshot {
   return taskTransaction(() => {
     expireClaims();
     return {
+      nextActions: allTasks().filter(t => (!actor || t.owner === actor) && t.status === "queued").map(t => ({
+        taskId: t.id, kind: t.kind, owner: t.owner,
+        instruction: t.kind === "discover"
+          ? "Claim, upload any outstanding actual discoveries, read them back and report discovery completed with coverage. Do not wait for form filling. This completion unlocks automatic assignment after both agents finish."
+          : t.kind === "application_prepare"
+            ? "Claim now and continue the actual employer form in your cloud browser. Inspect any existing saved draft first. Report needs_login, needs_input or blocked for assistance; review only after fully filled. Do not submit."
+            : t.kind === "draft"
+              ? "Claim now, read current profile and contact history, save the personalized draft and read it back, then complete the task. Do not send."
+              : "Claim and execute within the task's explicit authorization, then report and read back the result.",
+      })),
       batches: allBatches(),
       tasks: allTasks()
         .filter((t) => !actor || t.owner === actor)

@@ -14,7 +14,7 @@ export async function GET(req: Request) {
       ...taskSnapshot(actor),
       profile: readWorkspace().workspace.profile,
       instructions:
-        "Claim before working. Renew claim every 2 minutes. Read /api/agents/guide. Do not execute a task assigned to another actor. All writes use canonical IDs.",
+        "Follow nextActions on every queue check. Execute queued preparations and drafts without waiting for another user prompt. Upload and complete discovery before form filling. Claim before working. Renew claim every 2 minutes. Read /api/agents/guide. Do not execute a task assigned to another actor. All writes use canonical IDs.",
     });
   } catch (e) {
     return failure(e);

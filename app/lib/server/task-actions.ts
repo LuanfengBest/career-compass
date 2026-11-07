@@ -4,7 +4,7 @@ import { readWorkspace, writeWorkspace, setSetting } from "./database";
 import { HttpError } from "./http";
 import { addEvent, drafts, events, saveDraft, textField } from "./portal";
 import { normalizeLinkedIn, draftOwner, type Agent } from "../portal";
-import { irreversibleTask, recoverableClaimKind, type Task, type Batch } from "../tasks";
+import { irreversibleTask, recoverableClaimKind, preparationStatus, type Task, type Batch } from "../tasks";
 import {
   allTasks,
   allBatches,
@@ -27,6 +27,16 @@ function log(actor: Agent | "user", kind: string, text: string) {
     text,
     at: new Date().toISOString(),
   });
+}
+function preparationBlocker(value: unknown) {
+  if (value === undefined || value === null || value === "none") return "none";
+  if (!["login", "user_input", "technical"].includes(String(value))) throw new HttpError(400, "Invalid preparation blocker.");
+  return String(value);
+}
+function preparationQuestions(value: unknown): string[] {
+  if (value === undefined) return [];
+  if (!Array.isArray(value) || value.length > 100 || value.some(x => typeof x !== "string" || x.length > 2000)) throw new HttpError(400, "unansweredFields must be a list of actual missing questions.");
+  return value;
 }
 function safeUrl(v: unknown, linkedin = false) {
   const value = textField(v, "evidenceUrl", 2000);
@@ -536,6 +546,28 @@ export function userTaskAction(v: Record<string, unknown>) {
       }
       return { ok: true };
     }
+    if (v.action === "resume_preparation") {
+      if (t.kind !== "application_prepare" || !["needs_login", "needs_input"].includes(t.status))
+        throw new HttpError(409, "Only preparations awaiting login or answers can be resumed here.");
+      if (t.batchId && allBatches().find(b => b.id === t.batchId)?.status === "cancelled")
+        throw new HttpError(409, "Batch cancelled.");
+      if (allTasks().some(x => x.entityId === t.entityId && x.kind === "application_submit" && x.status !== "cancelled"))
+        throw new HttpError(409, "Submission already approved; do not repeat preparation.");
+      const { workspace } = readWorkspace();
+      if (workspace.applications.some(x => x.jobId === t.entityId && !["Saved", "To apply"].includes(x.stage)))
+        throw new HttpError(409, "Application already recorded; do not repeat preparation.");
+      t.input.profile = workspace.profile;
+      t.input.resume = {
+        requestedAt: new Date().toISOString(),
+        previousStatus: t.status,
+        note: typeof v.note === "string" ? v.note.slice(0, 4000) : "User reports the login or missing information is resolved.",
+        instructions: "Verify authentication in YOUR cloud browser, inspect the existing saved application and continue filling it. Read the latest shared profile. Preserve entered answers; do not create a duplicate application. If still blocked, report needs_login or needs_input with the exact missing step. Return review only after the actual form is filled. No final submission authorized.",
+      };
+      t.status = "queued";
+      finish(t);
+      log("user", "preparation_resumed", `${t.title}: same agent queued to continue filling. No submission approved.`);
+      return { ok: true, task: publicTask(t) };
+    }
     if (v.action === "retry") {
       if (t.status !== "blocked" || irreversibleTask(t))
         throw new HttpError(
@@ -567,7 +599,7 @@ export function userTaskAction(v: Record<string, unknown>) {
           "Possible duplicate records remain. Resolve their identity before retrying.",
         );
       t.status = "queued";
-      delete t.result;
+      // Keep evidence so the agent resumes an existing form instead of starting over.
       finish(t);
       return { ok: true };
     }
@@ -578,7 +610,7 @@ export function userTaskAction(v: Record<string, unknown>) {
         !t.result
       )
         throw new HttpError(409, "Review a prepared application first.");
-      if (t.result.formState !== "filled")
+      if (preparationStatus(t.result) !== "review")
         throw new HttpError(409, "The actual application form must be filled before approving submission. Ask the assigned agent to finish and update its preparation report.");
       const answers = textField(v.answers, "answers", 20000);
       const { workspace } = readWorkspace();
@@ -759,6 +791,11 @@ export function agentTaskAction(actor: Agent, v: Record<string, unknown>) {
           );
       }
       t.status = "claimed";
+      if (["application_prepare", "draft"].includes(t.kind)) {
+        const { workspace } = readWorkspace();
+        t.input.profile = workspace.profile;
+        if (t.kind === "draft") t.input.contact = workspace.contacts.find(c => c.id === t.entityId) || t.input.contact;
+      }
       t.claimToken = randomUUID();
       t.leaseUntil = leaseUntil;
       t.browser = v.usesLocalBrowser;
@@ -774,7 +811,7 @@ export function agentTaskAction(actor: Agent, v: Record<string, unknown>) {
     if (prior) return JSON.parse(String(prior.body));
     if (v.action === "amend_preparation") {
       const t = allTasks().find(x => x.id === v.taskId);
-      if (!t || t.owner !== actor || t.kind !== "application_prepare" || t.status !== "review")
+      if (!t || t.owner !== actor || t.kind !== "application_prepare" || !["review", "needs_login", "needs_input", "blocked"].includes(t.status))
         throw new HttpError(409, "Only the assigned agent may amend its application preparation awaiting review.");
       if (t.version !== v.version)
         throw new HttpError(409, "Preparation changed; read the current version before amending.");
@@ -789,13 +826,16 @@ export function agentTaskAction(actor: Agent, v: Record<string, unknown>) {
         answers: textField(v.answers, "answers", 20000),
         evidenceUrl: safeUrl(v.evidenceUrl),
         formState: String(v.formState),
+        blocker: preparationBlocker(v.blocker),
+        unansweredFields: preparationQuestions(v.unansweredFields),
       };
       taskDb().prepare("INSERT INTO task_requests VALUES (?,?)").run(`preparation-history:${t.id}:${t.version}`, JSON.stringify({task: publicTask(t)}));
       t.result = result;
+      t.status = preparationStatus(result);
       finish(t);
       const receipt = {ok: true, task: publicTask(t)};
       taskDb().prepare("INSERT INTO task_requests VALUES (?,?)").run(receiptId, JSON.stringify(receipt));
-      log(actor, "preparation_amended", `${t.title}: actual preparation evidence updated; still awaits user review. No submission authorized.`);
+      log(actor, "preparation_amended", `${t.title}: actual preparation evidence updated; ${t.status}. No submission authorized.`);
       return receipt;
     }
     const t = requireClaim(actor, v.taskId, v.claimToken);
@@ -812,11 +852,13 @@ export function agentTaskAction(actor: Agent, v: Record<string, unknown>) {
       throw new HttpError(400, "Unknown agent task action.");
     const summary = textField(v.summary, "summary", 5000);
     if (
-      !["completed", "blocked", "uncertain", "review"].includes(
+      !["completed", "blocked", "uncertain", "review", "needs_login", "needs_input"].includes(
         String(v.status),
       )
     )
       throw new HttpError(400, "Invalid result status.");
+    if (["needs_login", "needs_input"].includes(String(v.status)) && t.kind !== "application_prepare")
+      throw new HttpError(400, "Login/answer assistance statuses are for application preparation.");
     if (irreversibleTask(t) && v.status === "review")
       throw new HttpError(
         400,
@@ -828,7 +870,7 @@ export function agentTaskAction(actor: Agent, v: Record<string, unknown>) {
         "Prepared applications must use review status, not completed/submitted.",
       );
     t.result = { summary };
-    if (v.status === "review") {
+    if (v.status === "review" || (t.kind === "application_prepare" && ["needs_login", "needs_input", "blocked"].includes(String(v.status)))) {
       if (t.kind !== "application_prepare")
         throw new HttpError(
           400,
@@ -836,8 +878,10 @@ export function agentTaskAction(actor: Agent, v: Record<string, unknown>) {
         );
       if (v.formState !== undefined && !["not_opened", "partially_filled", "filled"].includes(String(v.formState))) throw new HttpError(400, "Invalid form state.");
       t.result.formState = v.formState || "not_opened";
-      t.result.answers = textField(v.answers, "answers", 20000);
-      t.result.evidenceUrl = safeUrl(v.evidenceUrl);
+      t.result.answers = v.answers ? textField(v.answers, "answers", 20000) : "";
+      if (v.evidenceUrl) t.result.evidenceUrl = safeUrl(v.evidenceUrl);
+      t.result.blocker = v.status === "needs_login" ? "login" : v.status === "needs_input" ? "user_input" : v.status === "blocked" ? "technical" : preparationBlocker(v.blocker);
+      t.result.unansweredFields = preparationQuestions(v.unansweredFields);
     }
     if (v.status === "completed") {
       if (t.kind === "discover") {
@@ -900,6 +944,7 @@ export function agentTaskAction(actor: Agent, v: Record<string, unknown>) {
       }
     }
     t.status = v.status as Task["status"];
+    if (t.kind === "application_prepare" && t.status !== "uncertain") t.status = preparationStatus(t.result);
     if (
       irreversibleTask(t) &&
       t.status === "blocked" &&
@@ -928,10 +973,10 @@ export function agentTaskAction(actor: Agent, v: Record<string, unknown>) {
       }
     }
     const result = { ok: true, task: publicTask(t),
+      nextTasks: allTasks().filter(x => x.owner === actor && x.status === "queued").map(publicTask),
+      nextStep: "Continue claiming your queued preparation and draft tasks now; no further approval is needed to fill forms or write drafts. Final sending/submission requires user approval. If waiting for the other discovery report, check again on your scheduled queue run.",
       ...(t.kind === "discover" ? {
         batch: allBatches().find(b => b.id === t.batchId),
-        nextTasks: allTasks().filter(x => x.owner === actor && x.batchId === t.batchId && x.status === "queued").map(publicTask),
-        nextStep: "If the batch is released, claim your preparation/draft tasks now. Otherwise poll for peer completion; no owner approval is needed for automatic assignment.",
       } : {}),
     };
     taskDb()
