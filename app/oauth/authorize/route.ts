@@ -17,7 +17,8 @@ export async function GET(req: Request) {
 export async function POST(req: Request) {
   try {
     oauthHost(req);
-    if(!ownerAuthenticated(req) || req.headers.get("origin")!==appOrigin() || req.headers.get("sec-fetch-site")==="cross-site") throw new OAuthError("access_denied","Sign in and approve from this workspace.",403);
+    if(!ownerAuthenticated(req)) throw new OAuthError("access_denied","Your workspace sign-in expired or is missing. Sign in, then restart Connect from ChatGPT.",403);
+    if(req.headers.get("origin")!==appOrigin() || req.headers.get("sec-fetch-site")==="cross-site") throw new OAuthError("access_denied","The browser did not send a valid workspace origin. Restart Connect from ChatGPT to load a fresh authorization page.",403);
     const p=await oauthForm(req);
     if(!["allow","deny"].includes(p.get("decision")||"")) throw new OAuthError("invalid_request","Choose Allow or Cancel.");
     return Response.redirect(finishConsent(p.get("consent")||"",consentBinding(req),p.get("decision")==="allow"),303);

@@ -25,6 +25,11 @@ try{
  const start=await call(authPath);assert.equal(start.status,303);assert.ok(new URL(start.headers.get('location')).searchParams.get('returnTo').startsWith('/oauth/authorize?'));
  const login=await call('/api/auth/login',{method:'POST',headers:{'content-type':'application/json',origin:base},body:JSON.stringify({password})});assert.equal(login.status,200);const cookie=login.headers.get('set-cookie').split(';')[0];
  const consent=await call(authPath,{headers:{cookie}});assert.equal(consent.status,200);const html=await consent.text(),nonce=html.match(/name="consent" value="([^"]+)"/)[1];
+ assert.equal(consent.headers.get('referrer-policy'),'same-origin');
+ assert.match(consent.headers.get('content-security-policy'),/form-action 'self' https:\/\/chatgpt\.com\/connector_platform_oauth_redirect https:\/\/chatgpt\.com\/connector\/oauth\//);
+ for(const headers of [{cookie,origin:'null'},{cookie},{origin:base},{cookie,origin:base,'sec-fetch-site':'cross-site'}]) {
+   assert.equal((await form('/oauth/authorize',{consent:nonce,decision:'allow'},headers)).status,403);
+ }
  assert.equal((await form('/oauth/authorize',{consent:nonce,decision:'allow'},{cookie,origin:'https://evil.test'})).status,403);
  const accepted=await form('/oauth/authorize',{consent:nonce,decision:'allow'},{cookie,origin:base});assert.equal(accepted.status,303);const target=new URL(accepted.headers.get('location'));assert.equal(target.searchParams.get('state'),'fixture');assert.equal(target.searchParams.get('iss'),base);
  const exchange={grant_type:'authorization_code',client_id:client.client_id,redirect_uri:redirect,code:target.searchParams.get('code'),code_verifier:verifier,resource};
