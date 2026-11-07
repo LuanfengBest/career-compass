@@ -362,8 +362,9 @@ export function TaskCenter() {
           Copy queue-check instructions in Agents ↗
         </Link>
         <p className="muted">
-          A reported schedule is not proof of a running session. This local
-          server and computer must stay online.
+          A queue check confirms access, not execution. Look for a claimed task
+          and a saved result. Cloud API access does not require your Mac;
+          local connections require the local server to stay online.
         </p>
       </section>
       {notice && (
@@ -499,6 +500,18 @@ export function TaskCenter() {
             </select>
           </label>
         </div>
+        <details className="task-status-help">
+          <summary>What happens next? Status and recovery guide</summary>
+          <ul>
+            <li><strong>Queued:</strong> assigned and waiting for the owner agent to claim it. A saved polling schedule alone does not prove pickup.</li>
+            <li><strong>Claimed:</strong> the agent holds the task. Check its result and updates for actual progress.</li>
+            <li><strong>Sign up / Sign in:</strong> sign in inside the assigned agent’s employer-site browser, then use “I’ve signed in — continue filling” on that task.</li>
+            <li><strong>Needs your answers:</strong> supply the missing facts, then use “Information ready — continue filling”. The same agent resumes preparation.</li>
+            <li><strong>Review:</strong> application preparation has reported a filled form, answers, evidence and no unresolved questions. Check these before approving submission. Email drafts are reviewed in <Link href="/outreach">Outreach</Link>.</li>
+            <li><strong>Blocked:</strong> read the reason and expand “Task input and result”. Resolve that specific issue before retrying. A possible duplicate needs identity/JD comparison and record reconciliation; retrying alone will not resolve it.</li>
+            <li><strong>Uncertain:</strong> check the external site for an actual send or submission before any retry.</li>
+          </ul>
+        </details>
         {!visible.length && <p>No tasks in this view.</p>}
         {visible.map((t) => (
           <TaskCard

@@ -9,6 +9,7 @@ import { taskAction } from "./task-center";
 import {BulkOutreach} from "./bulk-outreach";
 import { Badge, Heading } from "./ui";
 import { DraftProgress } from "./draft-progress";
+import { ContactSearch, searchContacts } from "./contact-search";
 export function OutreachCenter({
   initialContact,
 }: {
@@ -17,6 +18,8 @@ export function OutreachCenter({
   const state = useWorkspace();
   const { data, error } = usePortal();
   const [selected, setSelected] = useState(initialContact || "");
+  const [query, setQuery] = useState("");
+  const matches = searchContacts(state.contacts, query);
   const contact =
     state.contacts.find((c) => c.id === selected) || state.contacts[0];
   const relevant = data.drafts.filter((d) => d.contactId === contact?.id);
@@ -37,7 +40,10 @@ export function OutreachCenter({
       <div className="outreach-grid">
         <section className="panel contact-list">
           <h2>Contact queue</h2>
-          {state.contacts.map((c) => (
+          <ContactSearch query={query} onChange={setQuery} count={matches.length} total={state.contacts.length} />
+          {query && <p className="muted">Select a result to open it. Searching keeps your current draft open.</p>}
+          {!!state.contacts.length && !matches.length && <p>No matching contacts. Try another name, company or email.</p>}
+          {matches.map((c) => (
             <button
               key={c.id}
               className={`contact-option ${contact?.id === c.id ? "selected" : ""}`}

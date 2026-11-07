@@ -9,6 +9,7 @@ import { updateWorkspace, useWorkspace } from "../lib/store";
 import { Avatar, Badge, Heading } from "./ui";
 import { Pagination, usePagination } from "./pagination";
 import { DetailDialog } from "./detail-dialog";
+import { ContactSearch, searchContacts } from "./contact-search";
 export function People() {
   const state = useWorkspace();
   const { data: portal, error: portalError } = usePortal();
@@ -16,7 +17,9 @@ export function People() {
   const [syncMessage, setSyncMessage] = useState("");
   const [adding, setAdding] = useState(false);
   const [error, setError] = useState("");
-  const pagination = usePagination(state.contacts, 30);
+  const [query, setQuery] = useState("");
+  const matches = searchContacts(state.contacts, query);
+  const pagination = usePagination(matches, 30, query);
   const [selected, setSelected] = useState<string | null>(null);
   const person = state.contacts.find((c) => c.id === selected);
   function addContact(event: React.FormEvent<HTMLFormElement>) {
@@ -182,6 +185,8 @@ export function People() {
           {syncMessage || portalError}
         </p>
       )}
+      <ContactSearch query={query} onChange={setQuery} count={matches.length} total={state.contacts.length} />
+      {!matches.length && <p className="info-note">{query ? "No matching contacts. Try another name, company or email." : "No contacts yet. Saved agent discoveries will appear here."}</p>}
       <Pagination {...pagination} label="people" />
       <div className="people-grid compact-grid">
         {pagination.items.map((c) => {
