@@ -22,7 +22,7 @@ export function prepareWorkbenchRequest(endpoint: string, value: unknown, claim:
   const needsClaim = endpoint === '/api/agents/tasks' ? ['heartbeat','report'].includes(String(v.action)) : endpoint === '/api/agents' && ['opportunity','contact','draft'].includes(String(v.type));
   if (!needsClaim) return v;
   if (!claim || claim.owner !== actor) throw Error('This tab has no active claim. Check my queue, then Claim the queued task or Recover the live read/draft task here. This is a local validation error; no report was sent.');
-  if (Date.parse(claim.leaseUntil) <= now) throw Error('The claim expired. Stop and request requeue; no automatic retry.');
+  if (Date.parse(claim.leaseUntil) <= now) throw Error('The claim expired. Stop using it and refresh the queue. Discovery/read/draft tasks requeue automatically; claim again. External form/send tasks need reconciliation.');
   if (v.taskId !== undefined && v.taskId !== claim.id) throw Error('JSON taskId differs from the selected claim.');
   if (v.batchId !== undefined && v.batchId !== claim.batchId) throw Error('JSON batchId differs from the selected claim.');
   if (v.claimToken !== undefined && v.claimToken !== claim.claimToken) throw Error('Remove the old claimToken from your JSON. This workbench supplies the current token privately.');

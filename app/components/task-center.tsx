@@ -401,6 +401,7 @@ export function TaskCenter() {
                   .join(" · ")}{" "}
                 · {entities.length} unique records in this batch {b.autoRelease ? "· Automatic assignment" : "· Manual assignment"}
               </p>
+              {b.autoRelease && b.status === "discovering" && <p className="muted">Automatic preparation assignment is waiting for completion reports from {(["dot", "muse"] as const).filter(a => data.tasks.find(t => t.batchId === b.id && t.kind === "discover" && t.owner === a)?.status !== "completed").join(" and ")}. Saved records alone do not close a search. No manual release is needed.</p>}
               {b.status === "ready" && (
                 <button
                   className="button primary"
@@ -549,6 +550,7 @@ function TaskCard({
       {t.status === "review" && t.kind === "application_prepare" && (
         <>
           <p>Form state (Agent reported): {String(t.result?.formState || "not_opened").replaceAll("_", " ")}. This is not a submission receipt.</p>
+          {t.result?.formState !== "filled" && <p className="muted">Preparation is incomplete. The assigned agent must finish the actual form and update this report before submission approval.</p>}
           <label>
             Review and edit the proposed application answers
             <textarea
@@ -560,7 +562,7 @@ function TaskCard({
           </label>
           <button
             className="button primary"
-            disabled={busy || !answers.trim()}
+            disabled={busy || !answers.trim() || t.result?.formState !== "filled"}
             onClick={() =>
               act({
                 action: "approve_application",

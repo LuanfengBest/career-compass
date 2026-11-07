@@ -578,6 +578,8 @@ export function userTaskAction(v: Record<string, unknown>) {
         !t.result
       )
         throw new HttpError(409, "Review a prepared application first.");
+      if (t.result.formState !== "filled")
+        throw new HttpError(409, "The actual application form must be filled before approving submission. Ask the assigned agent to finish and update its preparation report.");
       const answers = textField(v.answers, "answers", 20000);
       const { workspace } = readWorkspace();
       const job = workspace.jobs.find((j) => j.id === t.entityId);
@@ -622,7 +624,7 @@ export function userTaskAction(v: Record<string, unknown>) {
 }
 
 export function agentTaskAction(actor: Agent, v: Record<string, unknown>) {
-  if (!["daily_tick", "begin_discovery_round", "register_worker", "claim", "recover_claim", "heartbeat", "report"].includes(String(v.action)))
+  if (!["daily_tick", "begin_discovery_round", "register_worker", "claim", "recover_claim", "heartbeat", "report", "amend_preparation"].includes(String(v.action)))
     throw new HttpError(400, 'Unknown agent task action. Completion requires action:"report", status:"completed", eventId, taskId, claimToken, summary and coverage. The browser workbench supplies claim fields.');
   return taskTransaction(() => {
     expireClaims();
@@ -659,7 +661,7 @@ export function agentTaskAction(actor: Agent, v: Record<string, unknown>) {
       if (!recoverableClaimKind(t.kind))
         throw new HttpError(409, "CLAIM_RECOVERY_EXTERNAL_WORK: Form preparation, sending and submission require owner reconciliation, not tab recovery.");
       if (t.status !== "claimed" || !t.leaseUntil || Date.parse(t.leaseUntil) <= Date.now())
-        throw new HttpError(409, "CLAIM_RECOVERY_INACTIVE: Only a live claim can move here. Expired or blocked tasks need owner review.");
+        throw new HttpError(409, "CLAIM_RECOVERY_INACTIVE: Only a live claim can move here. Refresh the queue: expired read/draft tasks requeue automatically; explicit blocks require resolution.");
       if (v.version !== t.version || v.stopPreviousContext !== true)
         throw new HttpError(409, "CLAIM_RECOVERY_CHANGED: Refresh the queue and confirm you will stop using the old execution context.");
       if (t.batchId && allBatches().find(b => b.id === t.batchId)?.status === "cancelled")
@@ -770,6 +772,32 @@ export function agentTaskAction(actor: Agent, v: Record<string, unknown>) {
       .prepare("SELECT body FROM task_requests WHERE id=?")
       .get(receiptId);
     if (prior) return JSON.parse(String(prior.body));
+    if (v.action === "amend_preparation") {
+      const t = allTasks().find(x => x.id === v.taskId);
+      if (!t || t.owner !== actor || t.kind !== "application_prepare" || t.status !== "review")
+        throw new HttpError(409, "Only the assigned agent may amend its application preparation awaiting review.");
+      if (t.version !== v.version)
+        throw new HttpError(409, "Preparation changed; read the current version before amending.");
+      const w = readWorkspace().workspace;
+      if (allTasks().some(x => x.entityId === t.entityId && x.kind === "application_submit" && x.status !== "cancelled") ||
+          w.applications.some(x => x.jobId === t.entityId && !["Saved", "To apply"].includes(x.stage)))
+        throw new HttpError(409, "Submission already approved or recorded; preparation cannot be amended.");
+      if (!["not_opened", "partially_filled", "filled"].includes(String(v.formState)))
+        throw new HttpError(400, "Report the actual formState.");
+      const result = {
+        summary: textField(v.summary, "summary", 5000),
+        answers: textField(v.answers, "answers", 20000),
+        evidenceUrl: safeUrl(v.evidenceUrl),
+        formState: String(v.formState),
+      };
+      taskDb().prepare("INSERT INTO task_requests VALUES (?,?)").run(`preparation-history:${t.id}:${t.version}`, JSON.stringify({task: publicTask(t)}));
+      t.result = result;
+      finish(t);
+      const receipt = {ok: true, task: publicTask(t)};
+      taskDb().prepare("INSERT INTO task_requests VALUES (?,?)").run(receiptId, JSON.stringify(receipt));
+      log(actor, "preparation_amended", `${t.title}: actual preparation evidence updated; still awaits user review. No submission authorized.`);
+      return receipt;
+    }
     const t = requireClaim(actor, v.taskId, v.claimToken);
     if (v.action === "heartbeat") {
       t.leaseUntil = new Date(Date.now() + 10 * 60000).toISOString();
@@ -899,7 +927,13 @@ export function agentTaskAction(actor: Agent, v: Record<string, unknown>) {
         if (b.autoRelease) releaseBatch(b.id, actor);
       }
     }
-    const result = { ok: true, task: publicTask(t) };
+    const result = { ok: true, task: publicTask(t),
+      ...(t.kind === "discover" ? {
+        batch: allBatches().find(b => b.id === t.batchId),
+        nextTasks: allTasks().filter(x => x.owner === actor && x.batchId === t.batchId && x.status === "queued").map(publicTask),
+        nextStep: "If the batch is released, claim your preparation/draft tasks now. Otherwise poll for peer completion; no owner approval is needed for automatic assignment.",
+      } : {}),
+    };
     taskDb()
       .prepare("INSERT INTO task_requests VALUES (?,?)")
       .run(receiptId, JSON.stringify(result));

@@ -215,6 +215,7 @@ test("application preparation requires review; approved submit is claimed once a
   report(prep, {
     status: "review",
     answers: "Fixture answers",
+    formState: "filled",
     evidenceUrl: "https://example.com/jobs/1",
   });
   const reviewed = s.allTasks().find((t) => t.id === prep.id);

@@ -4,6 +4,7 @@ import { HttpError } from "./http";
 import type { Agent } from "../portal";
 import {
   irreversibleTask,
+  recoverableClaimKind,
   type Task,
   type Batch,
   type Discovery,
@@ -102,7 +103,7 @@ export function requireClaim(
   if (t.owner !== actor) return reject("CLAIM_WRONG_ACTOR: The authenticated agent does not own this task.");
   if (t.status !== "claimed") return reject(`CLAIM_NOT_ACTIVE: Task status is ${t.status}, not claimed.`);
   if (!t.leaseUntil || !Number.isFinite(Date.parse(t.leaseUntil)) || Date.parse(t.leaseUntil) <= Date.now())
-    return reject("CLAIM_EXPIRED: The server-side lease has expired. Request requeue; heartbeat cannot revive it.");
+    return reject("CLAIM_EXPIRED: The server-side lease has expired. Refresh the queue; safe read/draft tasks requeue automatically. Heartbeat cannot revive an expired token.");
   if (typeof token !== "string" || !token) return reject("CLAIM_TOKEN_MISSING: Supply the private claimToken returned by the latest successful claim.");
   if (t.claimToken !== token) return reject("CLAIM_TOKEN_MISMATCH: This token does not match the current claim. Use the exact token from the latest successful claim; do not reuse an earlier one.");
   if (kind && t.kind !== kind) return reject("CLAIM_WRONG_KIND: This task does not permit the requested operation.");
@@ -141,21 +142,29 @@ export function recordDiscovery(
     .run(batchId, kind, entityId, actor, JSON.stringify(entry));
 }
 export function expireClaims() {
-  // Unknown external effects are never automatically reassigned.
-  for (const t of allTasks())
-    if (
-      t.status === "claimed" &&
-      Date.parse(t.leaseUntil || "") <= Date.now()
-    ) {
-      t.status = irreversibleTask(t) ? "uncertain" : "blocked";
+  const batches = allBatches();
+  const legacyExpiry = "Claim expired. Check the external page before retrying; no automatic retry.";
+  for (const t of allTasks()) {
+    const resumable = recoverableClaimKind(t.kind) && (!t.batchId || batches.some(b =>
+      b.id === t.batchId && b.status !== "cancelled" && (t.kind !== "discover" || b.status === "discovering")));
+    const expired = t.status === "claimed" && (!t.leaseUntil || Date.parse(t.leaseUntil) <= Date.now());
+    // Only migrate our own historical expiry blocks, never explicit agent failures.
+    const legacy = t.status === "blocked" && t.result?.summary === legacyExpiry && resumable;
+    if (expired || legacy) {
+      t.status = resumable ? "queued" : irreversibleTask(t) ? "uncertain" : "blocked";
       t.version++;
       t.updatedAt = new Date().toISOString();
       t.result = {
-        summary:
-          "Claim expired. Check the external page before retrying; no automatic retry.",
+        ...t.result,
+        summary: resumable ? "Claim expired; automatically queued for the same agent. Saved records are preserved. Claim again, read back existing results and continue without repeating external actions." : legacyExpiry,
+        recoveryReason: "claim_expired",
       };
+      delete t.claimToken;
+      delete t.leaseUntil;
       saveTask(t);
+      if (resumable) taskDb().prepare("DELETE FROM browser_claims WHERE task_id=?").run(t.id);
     }
+  }
 }
 export function publicTask(t: Task): Task {
   const clean = { ...t };

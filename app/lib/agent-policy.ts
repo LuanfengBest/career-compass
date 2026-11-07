@@ -1,6 +1,6 @@
 // Shared business instructions, not a scheduler or an agent-to-agent chat.
 export const agentPolicy = {
-  version: "2026-11-06.2",
+  version: "2026-11-07.1",
   purpose:
     "One shared career workspace. Agents work in their own products and report evidence here.",
   codex:
@@ -13,6 +13,8 @@ export const agentPolicy = {
     applicationClaimLockAndSubmissionReceipts: true,
   },
   common: [
+    "Upload discovered jobs and contacts before application filling or drafting, then complete discovery with coverage. Do not keep jobs only in a private tracker pending form results. Automatic assignment waits for both actual completion reports. Continue assigned preparation/draft tasks without asking the user again; only final sending/submission awaits user approval.",
+    "Expired discovery/draft/mail_review/linkedin_sync tasks automatically requeue for the same owner, preserving saved records. Refresh the queue, claim anew, read back and resume with stable eventIds; never reuse an expired claim. Explicit failure blocks and external form/send work are not automatically repeated. A review application report can be amended by its owner using amend_preparation with the current version and actual evidence, without a new claim; this does not authorize submission.",
     "Routine portal synchronization must use an authorized background HTTP/helper connection, not the user's foreground Chrome. If that transport is not available, preserve pending results and report the connection blocker; do not silently fall back to desktop control. Browser workbench use and any external form/LinkedIn desktop work require separately agreed computer use. A live read/draft claim lost across tabs can be explicitly recovered by its same owner; recovery invalidates the old token. It is not a way to retry external sends or resume an uncertain form.",
     "Both agents search the same full job/contact scope. Do not divide company categories or geography between agents. The 60/20/20 preference applies to the combined results.",
     "Desired workflow: finish discovery in a shared batch, reconcile both reports, then release execution. Both-found or Dot-only jobs go to Dot for application preparation; Muse-only jobs go to Muse. Contacts follow the same ownership rule for drafting. Search provenance is not lost when records merge.",
