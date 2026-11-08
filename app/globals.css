@@ -3399,6 +3399,58 @@ h3 {
 .task-summary strong {
   font-size: 2rem;
 }
+.task-summary .task-metric {
+  background: white;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  min-width: 0;
+}
+.task-metric small {
+  display: block;
+  margin-top: 6px;
+  font-size: 0.85rem;
+  color: #526da6;
+}
+.task-summary .task-metric:hover,
+.task-summary .task-metric[aria-pressed="true"] {
+  background: #f0f4ff;
+  border-color: #6f8bd6;
+}
+.task-metric:focus-visible {
+  outline: 3px solid #6f8bd6;
+  outline-offset: 3px;
+}
+.task-categories {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 16px 0;
+}
+.task-execution,
+.task-card {
+  scroll-margin-top: 24px;
+}
+.task-blocker,
+.task-form-progress,
+.task-outcome {
+  padding: 16px 20px;
+  margin: 16px 0;
+  border: 1px solid #dce3ef;
+  border-radius: 12px;
+  background: #f7f9fd;
+  overflow-wrap: anywhere;
+}
+.task-blocker {
+  background: #fffbf3;
+  border-color: #e9ddc3;
+}
+.task-blocker h3,
+.task-blocker p,
+.task-form-progress p {
+  margin: 8px 0;
+}
 .task-form {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

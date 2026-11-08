@@ -82,4 +82,10 @@ test('new login reports normalize review, explicit technical blocks remain block
  assert.ok(snapshot.nextActions.some(t=>t.taskId===draft.id&&t.instruction.includes('save the personalized draft')));
  assert.ok(snapshot.nextActions.every(t=>t.owner==='muse'));
 });
+test('technical failure with missing answers stays blocked instead of asking the user to fix browser access',()=>{
+ const t=s.newTask('application_prepare','muse','Browser unavailable fixture',{});s.saveTask(t);const active=claim(t);
+ const r=a.agentTaskAction('muse',{action:'report',taskId:t.id,claimToken:active.claimToken,eventId:id(),status:'review',summary:'Cloud browser unavailable; form not opened',blocker:'technical',formState:'not_opened',unansweredFields:['Employer question not accessible'],evidenceUrl:'https://example.com/job'});
+ assert.equal(r.task.status,'blocked');
+ assert.throws(()=>a.userTaskAction({action:'approve_application',taskId:t.id,version:r.task.version,answers:'Profile facts'}),/Review a prepared application first/);
+});
 test.after(()=>rmSync(dir,{recursive:true,force:true}));

@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { draftOwner } from "../lib/portal";
 import { useWorkspace } from "../lib/store";
-import { type TaskSnapshot, type Task, taskLabels, taskStatusLabel } from "../lib/tasks";
+import { type TaskSnapshot, type Task, taskLabels, taskStatusLabel, type TaskCategory, taskCategories, taskCategory, matchesTaskStatus, taskCompletionMeaning, blockedNextStep } from "../lib/tasks";
 import { Badge, Heading } from "./ui";
 const empty: TaskSnapshot = {
   tasks: [],
@@ -36,7 +36,32 @@ export function TaskCenter() {
     [prepare, setPrepare] = useState(true),
     [contactId, setContactId] = useState("");
   const [filter, setFilter] = useState("active");
+  const [category, setCategory] = useState<TaskCategory>("all");
+  const queueRef = useRef<HTMLElement>(null);
   const requestId = useRef("");
+  useEffect(() => {
+    function revealLinkedTask() {
+      if (!window.location.hash.startsWith("#task-")) return;
+      setFilter("all");
+      setCategory("all");
+    }
+    revealLinkedTask();
+    window.addEventListener("hashchange", revealLinkedTask);
+    return () => window.removeEventListener("hashchange", revealLinkedTask);
+  }, []);
+  const linkedTaskRevealed = useRef("");
+  useEffect(() => {
+    const id = window.location.hash.slice(1);
+    if (!id.startsWith("task-") || linkedTaskRevealed.current === id) return;
+    const element = document.getElementById(id);
+    if (element) { element.scrollIntoView({ block: "start" }); linkedTaskRevealed.current = id; }
+  }, [data, filter, category]);
+  function showStatus(status: string) {
+    setFilter(status);
+    setCategory("all");
+    queueRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    queueRef.current?.focus({ preventScroll: true });
+  }
   useEffect(() => {
     let alive = true,
       loading = false;
@@ -103,13 +128,8 @@ export function TaskCenter() {
       setBusy(false);
     }
   }
-  const visible = data.tasks.filter(
-    (t) =>
-      filter === "all" ||
-      (filter === "active"
-        ? !["completed", "cancelled"].includes(t.status)
-        : t.status === filter),
-  );
+  const visible = data.tasks.filter(t => matchesTaskStatus(t, filter) &&
+    (category === "all" || taskCategory(t.kind) === category));
   return (
     <>
       <Heading
@@ -160,20 +180,17 @@ export function TaskCenter() {
       </section>
       <div className="task-summary">
         {[
-          ["Queued", data.tasks.filter((t) => t.status === "queued").length],
-          ["Working", data.tasks.filter((t) => t.status === "claimed").length],
-          ["To review", data.tasks.filter((t) => t.status === "review").length],
-          [
-            "Needs attention",
-            data.tasks.filter((t) =>
-              ["blocked", "uncertain", "needs_login", "needs_input"].includes(t.status),
-            ).length,
-          ],
-        ].map(([label, n]) => (
-          <article className="panel" key={label}>
-            <strong>{n}</strong>
-            <span>{label}</span>
-          </article>
+          { label: "Queued", status: "queued" },
+          { label: "Working", status: "claimed" },
+          { label: "To review", status: "review" },
+          { label: "Needs attention", status: "attention" },
+        ].map(({ label, status }) => (
+          <button type="button" className="panel task-metric" key={status}
+            aria-controls="execution-queue" aria-pressed={filter === status && category === "all"}
+            onClick={() => showStatus(status)}>
+            <strong>{data.tasks.filter(t => matchesTaskStatus(t, status)).length}</strong>
+            <span>{label}<small>View tasks →</small></span>
+          </button>
         ))}
       </div>
       <section className="panel">
@@ -476,7 +493,7 @@ export function TaskCenter() {
           );
         })}
       </section>
-      <section className="panel">
+      <section className="panel task-execution" id="execution-queue" ref={queueRef} tabIndex={-1}>
         <div className="section-title">
           <h2>Execution queue</h2>
           <label>
@@ -484,6 +501,7 @@ export function TaskCenter() {
             <select value={filter} onChange={(e) => setFilter(e.target.value)}>
               {[
                 "active",
+                "attention",
                 "all",
                 "queued",
                 "claimed",
@@ -495,11 +513,19 @@ export function TaskCenter() {
                 "completed",
                 "cancelled",
               ].map((s) => (
-                <option key={s} value={s}>{s === "needs_login" ? "Sign up / Sign in" : s === "needs_input" ? "Needs your answers" : s}</option>
+                <option key={s} value={s}>{s === "attention" ? "Needs attention" : s === "claimed" ? "Working" : s === "needs_login" ? "Sign up / Sign in" : s === "needs_input" ? "Needs your answers" : s}</option>
               ))}
             </select>
           </label>
         </div>
+        <div className="task-categories" role="group" aria-label="Task category">
+          {taskCategories.map(c => <button key={c.value} type="button"
+            className={`button ${category === c.value ? "primary" : "secondary"}`}
+            aria-pressed={category === c.value} onClick={() => setCategory(c.value)}>
+            {c.label} · {data.tasks.filter(t => matchesTaskStatus(t, filter) && (c.value === "all" || taskCategory(t.kind) === c.value)).length}
+          </button>)}
+        </div>
+        <p className="muted" aria-live="polite">{visible.length} tasks in this view. Counts above cover all categories.</p>
         <details className="task-status-help">
           <summary>What happens next? Status and recovery guide</summary>
           <ul>
@@ -509,7 +535,9 @@ export function TaskCenter() {
             <li><strong>Needs your answers:</strong> supply the missing facts, then use “Information ready — continue filling”. The same agent resumes preparation.</li>
             <li><strong>Review:</strong> application preparation has reported a filled form, answers, evidence and no unresolved questions. Check these before approving submission. Email drafts are reviewed in <Link href="/outreach">Outreach</Link>.</li>
             <li><strong>Blocked:</strong> read the reason and expand “Task input and result”. Resolve that specific issue before retrying. A possible duplicate needs identity/JD comparison and record reconciliation; retrying alone will not resolve it.</li>
-            <li><strong>Uncertain:</strong> check the external site for an actual send or submission before any retry.</li>
+            <li><strong>Uncertain:</strong> the action’s outcome could not be confirmed, for example after a timeout. Check the external site for an actual send or submission before any retry.</li>
+            <li><strong>Completed:</strong> this task is finished. Discovery means records were reported; draft means text was saved. Only a submission or sending task reports that final action, with its receipt.</li>
+            <li><strong>Cancelled:</strong> this queued workflow was stopped. It does not withdraw an application, unsend a message or delete saved records.</li>
           </ul>
         </details>
         {!visible.length && <p>No tasks in this view.</p>}
@@ -551,7 +579,20 @@ function TaskCard({
         </div>
         <Badge>{taskStatusLabel(t.status)}</Badge>
       </div>
-      {t.result && <p className="message-preview">{t.result.summary}</p>}
+      {t.status === "blocked" ? <div className="task-blocker">
+        <h3>Why this task is blocked</h3>
+        <p>{t.result?.summary || "No specific reason was reported. Ask the assigned agent for the failed step."}</p>
+        <strong>How to continue</strong><p>{blockedNextStep(t)}</p>
+        <p className="muted">Owner: {t.owner}. Expand “Task input and result” for record IDs and the full report.</p>
+      </div> : t.result && <p className="message-preview">{t.result.summary}</p>}
+      {t.status === "completed" && <p className="task-outcome">{taskCompletionMeaning(t.kind)}</p>}
+      {t.status === "cancelled" && <p className="muted">Task stopped. Existing applications, messages and saved records remain unchanged.</p>}
+      {t.kind === "application_prepare" && <div className="task-form-progress">
+        <strong>Form progress · {t.result?.formState ? String(t.result.formState).replaceAll("_", " ") : "Not reported"}</strong>
+        <p>Agent-reported progress, not a live view of its cloud browser. An employer JD link does not open the agent’s saved form or share its login session. For the actual form, ask {t.owner} for a cloud-browser handoff or saved-form evidence.</p>
+        {t.result?.formState === "not_opened" && <p>The agent reports that the application form has not been opened. No entered answers are confirmed by this report.</p>}
+        {Array.isArray(t.result?.unansweredFields) && t.result.unansweredFields.length > 0 && <><strong>Missing answers</strong><ul>{(t.result.unansweredFields as string[]).map((q, i) => <li key={i}>{q}</li>)}</ul></>}
+      </div>}
       {t.result?.evidenceUrl && (
         <a
           href={t.result.evidenceUrl}
@@ -559,7 +600,7 @@ function TaskCard({
           rel="noreferrer"
           className="text-link"
         >
-          View reported evidence ↗
+          {t.kind === "application_prepare" ? "Open reported source / evidence (may be JD) ↗" : "View reported evidence ↗"}
         </a>
       )}
       {t.kind === "application_prepare" && ["needs_login", "needs_input"].includes(t.status) && (
@@ -568,7 +609,7 @@ function TaskCard({
           <p>{t.status === "needs_login"
             ? `Complete sign-in inside ${t.owner}'s employer-site cloud browser. Signing in on your own computer does not sign in that browser. Then queue the same task below; ${t.owner} will verify access and continue the saved form on its next queue check.`
             : "Update your profile in Settings or describe the missing facts below. The assigned agent will continue the actual application before requesting final review."}</p>
-          {Array.isArray(t.result?.unansweredFields) && <ul>{(t.result.unansweredFields as string[]).map((q, i) => <li key={i}>{q}</li>)}</ul>}
+
           <label>Note for the agent (no passwords)<textarea value={reason} onChange={e => setReason(e.target.value)} maxLength={4000} /></label>
           <button className="button primary" disabled={busy} onClick={() => act({action: "resume_preparation", taskId: t.id, version: t.version, note: reason || undefined})}>
             {t.status === "needs_login" ? "I've signed in — continue filling" : "Information ready — continue filling"}
